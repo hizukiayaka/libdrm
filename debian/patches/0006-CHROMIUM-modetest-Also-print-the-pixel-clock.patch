@@ -1,0 +1,46 @@
+From beb252ce8f72be85322902b7c6a9b7ada3e76cca Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?St=C3=A9phane=20Marchesin?= <marcheu@chromium.org>
+Date: Fri, 29 Jan 2016 15:31:12 -0800
+Subject: [PATCH 06/17] CHROMIUM: modetest: Also print the pixel clock
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+This can be useful for debugging. xrandr prints it, so why not.
+
+BUG=chrome-os-partner:49908
+BUG=b:26575005
+TEST=run modetest on nyan_freon
+
+Change-Id: I0156de5701934d8b1c4bc064cef433248b975b46
+Signed-off-by: Stéphane Marchesin <marcheu@chromium.org>
+---
+ tests/modetest/modetest.c | 5 +++--
+ 1 file changed, 3 insertions(+), 2 deletions(-)
+
+diff --git a/tests/modetest/modetest.c b/tests/modetest/modetest.c
+index 21d5438..dedd286 100644
+--- a/tests/modetest/modetest.c
++++ b/tests/modetest/modetest.c
+@@ -198,7 +198,7 @@ static void dump_encoders(struct device *dev)
+ 
+ static void dump_mode(drmModeModeInfo *mode)
+ {
+-	printf("  %s %d %d %d %d %d %d %d %d %d",
++	printf("  %s %d %d %d %d %d %d %d %d %d %d",
+ 	       mode->name,
+ 	       mode->vrefresh,
+ 	       mode->hdisplay,
+@@ -208,7 +208,8 @@ static void dump_mode(drmModeModeInfo *mode)
+ 	       mode->vdisplay,
+ 	       mode->vsync_start,
+ 	       mode->vsync_end,
+-	       mode->vtotal);
++	       mode->vtotal,
++	       mode->clock);
+ 
+ 	printf(" flags: ");
+ 	mode_flag_str(mode->flags);
+-- 
+2.7.4
+

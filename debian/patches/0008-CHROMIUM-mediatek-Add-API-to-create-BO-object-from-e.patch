@@ -1,0 +1,74 @@
+From 54ebc562dc95e4b3e4970967c2ce8d5a2509be08 Mon Sep 17 00:00:00 2001
+From: Nicolas Boichat <drinkcat@google.com>
+Date: Mon, 14 Dec 2015 17:10:40 +0800
+Subject: [PATCH 08/17] CHROMIUM: mediatek: Add API to create BO object from
+ existing handle
+
+Certain use cases involve importing BO from Prime FD and obtaining a
+handle, which then needs to be imported into libdrm.
+
+BUG=b:26864637
+TEST=N/A
+
+Change-Id: I7e9ee0dfd99cbad902cfe837a6a3e89adc348010
+Signed-off-by: Nicolas Boichat <drinkcat@google.com>
+Reviewed-on: https://chromium-review.googlesource.com/324675
+Commit-Ready: Nicolas Boichat <drinkcat@chromium.org>
+Tested-by: Nicolas Boichat <drinkcat@chromium.org>
+Reviewed-by: Daniel Kurtz <djkurtz@chromium.org>
+---
+ mediatek/mediatek_drm.c   | 25 +++++++++++++++++++++++++
+ mediatek/mediatek_drmif.h |  2 ++
+ 2 files changed, 27 insertions(+)
+
+diff --git a/mediatek/mediatek_drm.c b/mediatek/mediatek_drm.c
+index 121b266..1122b03 100644
+--- a/mediatek/mediatek_drm.c
++++ b/mediatek/mediatek_drm.c
+@@ -129,6 +129,31 @@ fail:
+ 	return NULL;
+ }
+ 
++struct mediatek_bo *mediatek_bo_from_handle(struct mediatek_device *dev,
++			uint32_t handle, uint32_t flags, uint32_t size)
++{
++	struct mediatek_bo *bo;
++
++	if (size == 0) {
++		fprintf(stderr, "invalid size.\n");
++		return NULL;
++	}
++
++	bo = calloc(1, sizeof(*bo));
++	if (!bo) {
++		fprintf(stderr, "failed to create bo[%s].\n",
++				strerror(errno));
++		return NULL;
++	}
++
++	bo->dev = dev;
++	bo->handle = handle;
++	bo->size = size;
++	bo->flags = flags;
++
++	return bo;
++}
++
+ /*
+  * Destroy a mediatek buffer object.
+  *
+diff --git a/mediatek/mediatek_drmif.h b/mediatek/mediatek_drmif.h
+index dca8852..47cd2d8 100644
+--- a/mediatek/mediatek_drmif.h
++++ b/mediatek/mediatek_drmif.h
+@@ -73,5 +73,7 @@ struct mediatek_bo *mediatek_bo_from_name(struct mediatek_device *dev,
+ 			uint32_t name);
+ int mediatek_bo_get_name(struct mediatek_bo *bo, uint32_t *name);
+ uint32_t mediatek_bo_handle(struct mediatek_bo *bo);
++struct mediatek_bo *mediatek_bo_from_handle(struct mediatek_device *dev,
++			uint32_t handle, uint32_t flags, uint32_t size);
+ void *mediatek_bo_map(struct mediatek_bo *bo);
+ #endif /* MEDIATEK_DRMIF_H_ */
+-- 
+2.7.4
+

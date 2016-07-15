@@ -1,0 +1,33 @@
+From 0014e07001b91b8e4645ccef98b79386b2c30c67 Mon Sep 17 00:00:00 2001
+From: Nicolas Boichat <drinkcat@google.com>
+Date: Thu, 28 Jan 2016 18:20:05 +0800
+Subject: [PATCH 03/17] libdrm: Add PRESUBMIT.cfg
+
+Prevent it from complaining about license information and tabs.
+
+BUG=b:26575005
+TEST=Submit patches, presubmit script does not complain.
+
+Change-Id: I1e45eb7362f4449691bb59c00115b1efe92c908e
+Signed-off-by: Nicolas Boichat <drinkcat@google.com>
+Reviewed-on: https://chromium-review.googlesource.com/324166
+Commit-Ready: Nicolas Boichat <drinkcat@chromium.org>
+Tested-by: Nicolas Boichat <drinkcat@chromium.org>
+Reviewed-by: Daniel Kurtz <djkurtz@chromium.org>
+---
+ PRESUBMIT.cfg | 3 +++
+ 1 file changed, 3 insertions(+)
+ create mode 100644 PRESUBMIT.cfg
+
+diff --git a/PRESUBMIT.cfg b/PRESUBMIT.cfg
+new file mode 100644
+index 0000000..9b0d5a4
+--- /dev/null
++++ b/PRESUBMIT.cfg
+@@ -0,0 +1,3 @@
++[Hook Overrides]
++cros_license_check: false
++tab_check: false
+-- 
+2.7.4
+

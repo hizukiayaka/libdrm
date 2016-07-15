@@ -1,0 +1,42 @@
+From 4dae1c4a4a8c20790460664dec82f2eda71bc197 Mon Sep 17 00:00:00 2001
+From: Nicolas Boichat <drinkcat@google.com>
+Date: Tue, 22 Dec 2015 18:43:49 +0800
+Subject: [PATCH 10/17] CHROMIUM: mediatek_drm: use 64-bit offsets
+
+This makes sure mmap64 is called, instead of mmap, so 64-bit
+offset in ioctl calls are preserved.
+
+BUG=b:26864637
+TEST=N/A
+
+Change-Id: I794d852c5ed942c35b40515cdcd7eb3270ae75a5
+Signed-off-by: Nicolas Boichat <drinkcat@google.com>
+Reviewed-on: https://chromium-review.googlesource.com/324677
+Commit-Ready: Nicolas Boichat <drinkcat@chromium.org>
+Tested-by: Nicolas Boichat <drinkcat@chromium.org>
+Reviewed-by: Daniel Kurtz <djkurtz@chromium.org>
+---
+ mediatek/Android.mk | 6 +++++-
+ 1 file changed, 5 insertions(+), 1 deletion(-)
+
+diff --git a/mediatek/Android.mk b/mediatek/Android.mk
+index 6ab63e9..c9ac9f1 100644
+--- a/mediatek/Android.mk
++++ b/mediatek/Android.mk
+@@ -15,8 +15,12 @@ LOCAL_C_INCLUDES := \
+ 	$(LIBDRM_TOP)/mediatek \
+ 	$(LIBDRM_TOP)/include/drm
+ 
++# This makes sure mmap64 is used, as mmap offsets can be larger than 32-bit
+ LOCAL_CFLAGS := \
+-	-DHAVE_LIBDRM_ATOMIC_PRIMITIVES=1
++	-DHAVE_LIBDRM_ATOMIC_PRIMITIVES=1 \
++	-D_LARGEFILE_SOURCE \
++	-D_LARGEFILE64_SOURCE \
++	-D_FILE_OFFSET_BITS=64
+ 
+ LOCAL_COPY_HEADERS := mediatek_drm.h mediatek_drmif.h
+ LOCAL_COPY_HEADERS_TO := libdrm
+-- 
+2.7.4
+

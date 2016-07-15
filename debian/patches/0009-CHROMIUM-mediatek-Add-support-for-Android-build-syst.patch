@@ -1,0 +1,81 @@
+From 39b574768ceb50cf7b38d05f6e6327b17ba0e8b0 Mon Sep 17 00:00:00 2001
+From: Nicolas Boichat <drinkcat@google.com>
+Date: Mon, 14 Dec 2015 17:11:20 +0800
+Subject: [PATCH 09/17] CHROMIUM: mediatek: Add support for Android build
+ system
+
+This patch adds changes necessary to enable building libdrm_mediatek
+inside Android build system.
+
+BUG=b:26864637
+TEST=N/A
+
+Change-Id: I0788fa4c1eee1a8c5fde2d32890493c5f475b5d5
+Signed-off-by: Nicolas Boichat <drinkcat@google.com>
+Reviewed-on: https://chromium-review.googlesource.com/324676
+Commit-Ready: Nicolas Boichat <drinkcat@chromium.org>
+Tested-by: Nicolas Boichat <drinkcat@chromium.org>
+Reviewed-by: Nicolas Boichat <drinkcat@chromium.org>
+Signed-off-by: Randy Li <randy.li@rock-chips.com>
+---
+ libkms/Android.mk   |  2 ++
+ mediatek/Android.mk | 27 +++++++++++++++++++++++++++
+ 2 files changed, 29 insertions(+)
+ create mode 100644 mediatek/Android.mk
+
+diff --git a/libkms/Android.mk b/libkms/Android.mk
+index a406782..74edef3 100644
+--- a/libkms/Android.mk
++++ b/libkms/Android.mk
+@@ -2,6 +2,7 @@ DRM_GPU_DRIVERS := $(strip $(filter-out swrast, $(BOARD_GPU_DRIVERS)))
+ 
+ intel_drivers := i915 i965 i915g ilo
+ radeon_drivers := r300g r600g radeonsi
++mediatek_drivers := mediatek
+ nouveau_drivers := nouveau
+ virgl_drivers := virgl
+ vmwgfx_drivers := vmwgfx
+@@ -9,6 +10,7 @@ vmwgfx_drivers := vmwgfx
+ valid_drivers := \
+ 	$(intel_drivers) \
+ 	$(radeon_drivers) \
++	$(mediatek_drivers) \
+ 	$(nouveau_drivers) \
+ 	$(virgl_drivers) \
+ 	$(vmwgfx_drivers)
+diff --git a/mediatek/Android.mk b/mediatek/Android.mk
+new file mode 100644
+index 0000000..6ab63e9
+--- /dev/null
++++ b/mediatek/Android.mk
+@@ -0,0 +1,27 @@
++LOCAL_PATH := $(call my-dir)
++include $(CLEAR_VARS)
++
++LOCAL_MODULE := libdrm_mediatek
++LOCAL_MODULE_TAGS := optional
++
++LOCAL_SHARED_LIBRARIES := libdrm
++
++LOCAL_SRC_FILES := mediatek_drm.c
++LOCAL_EXPORT_C_INCLUDE_DIRS += \
++	$(LOCAL_PATH)/mediatek
++
++LOCAL_C_INCLUDES := \
++	$(LIBDRM_TOP) \
++	$(LIBDRM_TOP)/mediatek \
++	$(LIBDRM_TOP)/include/drm
++
++LOCAL_CFLAGS := \
++	-DHAVE_LIBDRM_ATOMIC_PRIMITIVES=1
++
++LOCAL_COPY_HEADERS := mediatek_drm.h mediatek_drmif.h
++LOCAL_COPY_HEADERS_TO := libdrm
++
++LOCAL_SHARED_LIBRARIES := \
++	libdrm
++
++include $(BUILD_SHARED_LIBRARY)
+-- 
+2.7.4
+

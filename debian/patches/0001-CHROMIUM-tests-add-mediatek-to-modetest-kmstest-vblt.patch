@@ -1,0 +1,65 @@
+From e392883857ca471c00595348489eab152f9a7bf3 Mon Sep 17 00:00:00 2001
+From: Daniel Kurtz <djkurtz@chromium.org>
+Date: Wed, 25 Mar 2015 11:55:40 -0700
+Subject: [PATCH 01/17] CHROMIUM: tests: add mediatek to modetest, kmstest,
+ vbltest and proptest
+
+There is a mediatek drm kms driver.
+Add "mediatek" to the static lists of driver names in the the standard set
+of tests.
+
+BUG=chrome-os-partner:38389
+BUG=b:26575005
+TEST=Use kmstest on oak to verify
+
+Change-Id: Ica4484fa061c264df488e047ab401f2ea7a04a4f
+Signed-off-by: Daniel Kurtz <djkurtz@chromium.org>
+Signed-off-by: JB Tsai <jb.tsai@mediatek.com>
+Signed-off-by: Nicolas Boichat <drinkcat@chromium.org>
+Reviewed-on: https://chromium-review.googlesource.com/324182
+Signed-off-by: Randy Li <randy.li@rock-chips.com>
+---
+ tests/kmstest/main.c | 14 ++++++++++++++
+ tests/util/kms.c     |  1 +
+ 2 files changed, 15 insertions(+)
+
+diff --git a/tests/kmstest/main.c b/tests/kmstest/main.c
+index a0e4ebb..65ee527 100644
+--- a/tests/kmstest/main.c
++++ b/tests/kmstest/main.c
+@@ -66,6 +66,20 @@ static void usage(const char *program)
+ 	fprintf(stderr, "  -M MODULE  open the given module\n");
+ }
+ 
++static const char *drivers[] = {
++	"i915",
++	"radeon",
++	"nouveau",
++	"vmwgfx",
++	"exynos",
++	"amdgpu",
++	"imx-drm",
++	"rockchip",
++	"atmel-hlcdc",
++	"mediatek",
++	NULL
++};
++
+ int main(int argc, char** argv)
+ {
+ 	static const char optstr[] = "D:M:";
+diff --git a/tests/util/kms.c b/tests/util/kms.c
+index 650b23b..ebce0e1 100644
+--- a/tests/util/kms.c
++++ b/tests/util/kms.c
+@@ -142,6 +142,7 @@ static const char * const modules[] = {
+ 	"fsl-dcu-drm",
+ 	"vc4",
+ 	"virtio_gpu",
++	"mediatek",
+ };
+ 
+ int util_open(const char *device, const char *module)
+-- 
+2.7.4
+

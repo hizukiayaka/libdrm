@@ -1,0 +1,37 @@
+From b1dc1bcc590a6ff07e3e0aafa21af1a9dd169a28 Mon Sep 17 00:00:00 2001
+From: Daniel Kurtz <djkurtz@chromium.org>
+Date: Wed, 27 Jan 2016 19:49:58 +0800
+Subject: [PATCH 02/17] CHROMIUM: Add Mediatek proprietary format
+
+Add DRM_FORMAT_MT21 for Mediatek Properity video block format.
+
+BUG=chrome-os-partner:38394
+BUG=b:26575005
+TEST=oak: Boot to UI.
+
+Change-Id: If9ca6e2edad70fd33a99b8f3ef51dc75a9ab9338
+Signed-off-by: Chiawen Lee <chiawen.lee@mediatek.com>
+Reviewed-on: https://chromium-review.googlesource.com/324183
+Commit-Ready: Nicolas Boichat <drinkcat@chromium.org>
+Tested-by: Nicolas Boichat <drinkcat@chromium.org>
+Reviewed-by: Daniel Kurtz <djkurtz@chromium.org>
+---
+ include/drm/drm_fourcc.h | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/include/drm/drm_fourcc.h b/include/drm/drm_fourcc.h
+index 4d8da69..7ce1a6f 100644
+--- a/include/drm/drm_fourcc.h
++++ b/include/drm/drm_fourcc.h
+@@ -116,6 +116,8 @@
+ #define DRM_FORMAT_NV24		fourcc_code('N', 'V', '2', '4') /* non-subsampled Cr:Cb plane */
+ #define DRM_FORMAT_NV42		fourcc_code('N', 'V', '4', '2') /* non-subsampled Cb:Cr plane */
+ 
++#define DRM_FORMAT_MT21		fourcc_code('M', 'T', '2', '1') /* Mediatek Block Mode */
++
+ /*
+  * 3 plane YCbCr
+  * index 0: Y plane, [7:0] Y
+-- 
+2.7.4
+

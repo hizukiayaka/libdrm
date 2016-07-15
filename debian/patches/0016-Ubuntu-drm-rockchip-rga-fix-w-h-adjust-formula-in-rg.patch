@@ -1,0 +1,50 @@
+From 0d13ceeb0480751b605321c72172701d4846cfc1 Mon Sep 17 00:00:00 2001
+From: Yakir Yang <ykk@rock-chips.com>
+Date: Thu, 28 Apr 2016 14:32:01 +0800
+Subject: [PATCH 16/17] Ubuntu: drm/rockchip: rga: fix w/h adjust formula in
+ rga_copy
+
+BUG=libdrm-rockchip: Issue#2
+
+Reported-by: Jacob Chen <jacob-chen@iotwrt.com>
+Signed-off-by: Yakir Yang <ykk@rock-chips.com>
+---
+ rockchip/rockchip_rga.c | 9 ++++-----
+ 1 file changed, 4 insertions(+), 5 deletions(-)
+
+diff --git a/rockchip/rockchip_rga.c b/rockchip/rockchip_rga.c
+index 9319ca5..ba2297e 100644
+--- a/rockchip/rockchip_rga.c
++++ b/rockchip/rockchip_rga.c
+@@ -917,16 +917,16 @@ int rga_copy(struct rga_context *ctx, struct rga_image *src,
+ 
+ 	src_w = w;
+ 	src_h = h;
+-	if (src_x + src->width > w)
++	if (src_x + src_w > src->width)
+ 		src_w = src->width - src_x;
+-	if (src_y + src->height > h)
++	if (src_y + src_h > src->height)
+ 		src_h = src->height - src_y;
+ 
+ 	dst_w = w;
+ 	dst_h = h;
+-	if (dst_x + dst->width > w)
++	if (dst_x + dst_w > dst->width)
+ 		dst_w = dst->width - dst_x;
+-	if (dst_y + dst->height > h)
++	if (dst_y + dst_h > dst->height)
+ 		dst_h = dst->height - dst_y;
+ 
+ 	w = (src_w < dst_w) ? src_w : dst_w;
+@@ -938,7 +938,6 @@ int rga_copy(struct rga_context *ctx, struct rga_image *src,
+ 		return -EINVAL;
+ 	}
+ 
+-
+ 	return rga_multiple_transform(ctx, src, dst, src_x, src_y, src_w,
+ 				      src_h, dst_x, dst_y, dst_w, dst_h,
+ 				      0, 0, 0);
+-- 
+2.7.4
+

@@ -1,0 +1,27 @@
+From 7aecf8e2ebfcb19ef5cc14efb29633e0e4952353 Mon Sep 17 00:00:00 2001
+From: Yakir Yang <ykk@rock-chips.com>
+Date: Wed, 27 Apr 2016 18:11:29 +0800
+Subject: [PATCH 15/17] Ubuntu: drm/rockchip: fix window size error in rga_copy
+ function
+
+Signed-off-by: Yakir Yang <ykk@rock-chips.com>
+---
+ rockchip/rockchip_rga.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/rockchip/rockchip_rga.c b/rockchip/rockchip_rga.c
+index aa7c152..9319ca5 100644
+--- a/rockchip/rockchip_rga.c
++++ b/rockchip/rockchip_rga.c
+@@ -923,7 +923,7 @@ int rga_copy(struct rga_context *ctx, struct rga_image *src,
+ 		src_h = src->height - src_y;
+ 
+ 	dst_w = w;
+-	dst_h = w;
++	dst_h = h;
+ 	if (dst_x + dst->width > w)
+ 		dst_w = dst->width - dst_x;
+ 	if (dst_y + dst->height > h)
+-- 
+2.7.4
+

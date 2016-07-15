@@ -1,0 +1,81 @@
+From a7108eab3e5c0a4bb5e5849f47425e9410382d2d Mon Sep 17 00:00:00 2001
+From: Tomasz Figa <tfiga@google.com>
+Date: Tue, 28 Apr 2015 09:55:06 +0900
+Subject: [PATCH 17/17] CHROMIUM: rockchip: Add support for Android build
+ system
+
+This patch adds changes necessary to enable building libdrm_rockchip
+inside Android build system.
+
+BUG=b:26864637
+TEST=N/A
+
+Change-Id: Ib9562f4891dfd5868ba4cb0b7acc20467a2d4084
+Signed-off-by: Tomasz Figa <tfiga@google.com>
+Reviewed-on: https://chromium-review.googlesource.com/324674
+Commit-Ready: Nicolas Boichat <drinkcat@chromium.org>
+Tested-by: Nicolas Boichat <drinkcat@chromium.org>
+Reviewed-by: Nicolas Boichat <drinkcat@chromium.org>
+Signed-off-by: Randy Li <randy.li@rock-chips.com>
+---
+ libkms/Android.mk   |  2 ++
+ rockchip/Android.mk | 27 +++++++++++++++++++++++++++
+ 2 files changed, 29 insertions(+)
+ create mode 100644 rockchip/Android.mk
+
+diff --git a/libkms/Android.mk b/libkms/Android.mk
+index 74edef3..156060a 100644
+--- a/libkms/Android.mk
++++ b/libkms/Android.mk
+@@ -3,6 +3,7 @@ DRM_GPU_DRIVERS := $(strip $(filter-out swrast, $(BOARD_GPU_DRIVERS)))
+ intel_drivers := i915 i965 i915g ilo
+ radeon_drivers := r300g r600g radeonsi
+ mediatek_drivers := mediatek
++rockchip_drivers := rockchip
+ nouveau_drivers := nouveau
+ virgl_drivers := virgl
+ vmwgfx_drivers := vmwgfx
+@@ -11,6 +12,7 @@ valid_drivers := \
+ 	$(intel_drivers) \
+ 	$(radeon_drivers) \
+ 	$(mediatek_drivers) \
++	$(rockchip_drivers) \
+ 	$(nouveau_drivers) \
+ 	$(virgl_drivers) \
+ 	$(vmwgfx_drivers)
+diff --git a/rockchip/Android.mk b/rockchip/Android.mk
+new file mode 100644
+index 0000000..4569044
+--- /dev/null
++++ b/rockchip/Android.mk
+@@ -0,0 +1,27 @@
++LOCAL_PATH := $(call my-dir)
++include $(CLEAR_VARS)
++
++LOCAL_MODULE := libdrm_rockchip
++LOCAL_MODULE_TAGS := optional
++
++LOCAL_SHARED_LIBRARIES := libdrm
++
++LOCAL_SRC_FILES := rockchip_drm.c
++LOCAL_EXPORT_C_INCLUDE_DIRS += \
++	$(LOCAL_PATH)/rockchip
++
++LOCAL_C_INCLUDES := \
++	$(LIBDRM_TOP) \
++	$(LIBDRM_TOP)/rockchip \
++	$(LIBDRM_TOP)/include/drm
++
++LOCAL_CFLAGS := \
++	-DHAVE_LIBDRM_ATOMIC_PRIMITIVES=1
++
++LOCAL_COPY_HEADERS := rockchip_drm.h rockchip_drmif.h
++LOCAL_COPY_HEADERS_TO := libdrm
++
++LOCAL_SHARED_LIBRARIES := \
++	libdrm
++
++include $(BUILD_SHARED_LIBRARY)
+-- 
+2.7.4
+

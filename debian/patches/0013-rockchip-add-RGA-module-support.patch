@@ -1,0 +1,2398 @@
+From 93abf53497b7ef07ee06799892b62bbf40784112 Mon Sep 17 00:00:00 2001
+From: Yakir Yang <ykk@rock-chips.com>
+Date: Mon, 28 Mar 2016 01:53:06 -0500
+Subject: [PATCH 13/17] rockchip: add RGA module support
+
+RGA is a separate 2D raster graphic acceleration unit.
+It accelerates 2D graphics operations, such as point/line drawing,
+image scaling, rotation, BitBLT, alpha blending and image blur/sharpness.
+
+Signed-off-by: Yakir Yang <ykk@rock-chips.com>
+Signed-off-by: Randy Li <randy.li@rock-chips.com>
+---
+ configure.ac                       |   1 +
+ rockchip/Makefile.am               |   5 +-
+ rockchip/rga_reg.h                 | 460 ++++++++++++++++++
+ rockchip/rockchip_drm.h            |  48 +-
+ rockchip/rockchip_drmif.h          |   2 +
+ rockchip/rockchip_rga.c            | 945 +++++++++++++++++++++++++++++++++++++
+ rockchip/rockchip_rga.h            |  85 ++++
+ tests/Makefile.am                  |   4 +
+ tests/rockchip/Makefile.am         |  25 +
+ tests/rockchip/rockchip_rga_test.c | 719 ++++++++++++++++++++++++++++
+ 10 files changed, 2290 insertions(+), 4 deletions(-)
+ create mode 100644 rockchip/rga_reg.h
+ create mode 100644 rockchip/rockchip_rga.c
+ create mode 100644 rockchip/rockchip_rga.h
+ create mode 100644 tests/rockchip/Makefile.am
+ create mode 100644 tests/rockchip/rockchip_rga_test.c
+
+--- a/configure.ac
++++ b/configure.ac
+@@ -422,6 +422,7 @@
+ 	AC_DEFINE(HAVE_VC4, 1, [Have VC4 support])
+ fi
+ 
++AM_CONDITIONAL(HAVE_MEDIATEK, [test "x$MEDIATEK" = xyes])
+ if test "x$MEDIATEK" = xyes; then
+ 	AC_DEFINE(HAVE_MEDIATEK, 1, [Have MEDIATEK support])
+ fi
+@@ -556,6 +557,7 @@
+ 	tests/amdgpu/Makefile
+ 	tests/vbltest/Makefile
+ 	tests/exynos/Makefile
++	tests/rockchip/Makefile
+ 	tests/tegra/Makefile
+ 	tests/nouveau/Makefile
+ 	tests/util/Makefile
+--- a/rockchip/Makefile.am
++++ b/rockchip/Makefile.am
+@@ -11,10 +11,11 @@
+ libdrm_rockchip_la_LIBADD = ../libdrm.la @PTHREADSTUBS_LIBS@
+ 
+ libdrm_rockchip_la_SOURCES = \
+-	rockchip_drm.c
++	rockchip_drm.c \
++	rockchip_rga.c
+ 
+ libdrm_rockchipincludedir = ${includedir}/libdrm
+-libdrm_rockchipinclude_HEADERS = rockchip_drmif.h rockchip_drm.h
++libdrm_rockchipinclude_HEADERS = rockchip_drmif.h rockchip_drm.h rockchip_rga.h
+ 
+ pkgconfigdir = @pkgconfigdir@
+ pkgconfig_DATA = libdrm_rockchip.pc
+--- /dev/null
++++ b/rockchip/rga_reg.h
+@@ -0,0 +1,460 @@
++/*
++ * Copyright (C) 2016 Fuzhou Electronics Co.Ltd
++ * Authors:
++ *	Yakir Yang <ykk@rock-chips.com>
++ *
++ * This program is free software; you can redistribute  it and/or modify it
++ * under  the terms of  the GNU General  Public License as published by the
++ * Free Software Foundation;  either version 2 of the  License, or (at your
++ * option) any later version.
++ *
++ */
++
++#ifndef _RGA_REG_H_
++#define _RGA_REG_H_
++
++#define MODE_CTRL			0x0100
++#define SRC_INFO			0x0104
++#define SRC_Y_RGB_BASE_ADDR		0x0108
++#define SRC_CB_BASE_ADDR		0x010c
++#define SRC_CR_BASE_ADDR		0x0110
++#define SRC1_RGB_BASE_ADDR		0x0114
++#define SRC_VIR_INFO			0x0118
++#define SRC_ACT_INFO			0x011c
++#define SRC_X_FACTOR			0x0120
++#define SRC_Y_FACTOR			0x0124
++#define SRC_BG_COLOR			0x0128
++#define SRC_FG_COLOR			0x012c
++#define SRC_TR_COLOR0			0x0130
++#define SRC_TR_COLOR1			0x0134
++
++#define DST_INFO			0x0138
++#define DST_Y_RGB_BASE_ADDR		0x013c
++#define DST_CB_BASE_ADDR		0x0140
++#define DST_CR_BASE_ADDR		0x0144
++#define DST_VIR_INFO			0x0148
++#define DST_ACT_INFO			0x014c
++
++#define ALPHA_CTRL0			0x0150
++#define ALPHA_CTRL1			0x0154
++#define FADING_CTRL			0x0158
++#define PAT_CON				0x015c
++#define ROP_CON0			0x0160
++#define ROP_CON1			0x0164
++#define MASK_BASE			0x0168
++
++#define MMU_CTRL1			0x016c
++#define MMU_SRC_BASE			0x0170
++#define MMU_SRC1_BASE			0x0174
++#define MMU_DST_BASE			0x0178
++#define MMU_ELS_BASE			0x017c
++
++enum e_rga_render_mode {
++	RGA_MODE_RENDER_BITBLT = 0,
++	RGA_MODE_RENDER_COLOR_PALETTE = 1,
++	RGA_MODE_RENDER_RECTANGLE_FILL = 2,
++	RGA_MODE_RENDER_UPDATE_PALETTE_LUT_RAM = 3,
++};
++
++enum e_rga_bitblt_mode {
++	RGA_MODE_BITBLT_MODE_SRC_TO_DST = 0,
++	RGA_MODE_BITBLT_MODE_SRC_SRC1_TO_DST = 1,
++};
++
++enum e_rga_cf_rop4_pat {
++	RGA_MODE_CF_ROP4_SOLID = 0,
++	RGA_MODE_CF_ROP4_PATTERN = 1,
++};
++
++enum e_rga_src_color_format {
++	RGA_SRC_COLOR_FMT_ABGR8888 = 0,
++	RGA_SRC_COLOR_FMT_XBGR8888 = 1,
++	RGA_SRC_COLOR_FMT_RGB888 = 2,
++	RGA_SRC_COLOR_FMT_RGB565 = 4,
++	RGA_SRC_COLOR_FMT_ARGB1555 = 5,
++	RGA_SRC_COLOR_FMT_ARGB4444 = 6,
++	RGA_SRC_COLOR_FMT_YUV422SP = 8,
++	RGA_SRC_COLOR_FMT_YUV422P = 9,
++	RGA_SRC_COLOR_FMT_YUV420SP = 10,
++	RGA_SRC_COLOR_FMT_YUV420P = 11,
++	/* SRC_COLOR Palette */
++	RGA_SRC_COLOR_FMT_CP_1BPP = 12,
++	RGA_SRC_COLOR_FMT_CP_2BPP = 13,
++	RGA_SRC_COLOR_FMT_CP_4BPP = 14,
++	RGA_SRC_COLOR_FMT_CP_8BPP = 15,
++	RGA_SRC_COLOR_FMT_MASK = 15,
++};
++
++enum e_rga_src_color_swap {
++	RGA_SRC_COLOR_RB_SWAP = 1,
++	RGA_SRC_COLOR_ALPHA_SWAP = 2,
++	RGA_SRC_COLOR_UV_SWAP = 4,
++};
++
++enum e_rga_src_csc_mode {
++	RGA_SRC_CSC_MODE_BT601_R0 = 0,
++	RGA_SRC_CSC_MODE_BT601_R1 = 1,
++	RGA_SRC_CSC_MODE_BT709_R0 = 2,
++	RGA_SRC_CSC_MODE_BT709_R1 = 3,
++	/*
++	RGA_SRC_CSC_MODE_BYPASS = 0,
++	RGA_SRC_CSC_MODE_BT601_R0 = 1,
++	RGA_SRC_CSC_MODE_BT601_R1 = 2,
++	RGA_SRC_CSC_MODE_BT709_R0 = 3,
++	*/
++};
++
++enum e_rga_src_rot_mode {
++	RGA_SRC_ROT_MODE_0_DEGREE = 0,
++	RGA_SRC_ROT_MODE_90_DEGREE = 1,
++	RGA_SRC_ROT_MODE_180_DEGREE = 2,
++	RGA_SRC_ROT_MODE_270_DEGREE = 3,
++};
++
++enum e_rga_src_mirr_mode {
++	RGA_SRC_MIRR_MODE_NO = 0,
++	RGA_SRC_MIRR_MODE_X = 1,
++	RGA_SRC_MIRR_MODE_Y = 2,
++	RGA_SRC_MIRR_MODE_X_Y = 3,
++};
++
++enum e_rga_src_hscl_mode {
++	RGA_SRC_HSCL_MODE_NO = 0,
++	RGA_SRC_HSCL_MODE_DOWN = 1,
++	RGA_SRC_HSCL_MODE_UP = 2,
++};
++
++enum e_rga_src_vscl_mode {
++	RGA_SRC_VSCL_MODE_NO = 0,
++	RGA_SRC_VSCL_MODE_DOWN = 1,
++	RGA_SRC_VSCL_MODE_UP = 2,
++};
++
++enum e_rga_src_trans_enable {
++	RGA_SRC_TRANS_ENABLE_R = 1,
++	RGA_SRC_TRANS_ENABLE_G = 2,
++	RGA_SRC_TRANS_ENABLE_B = 4,
++	RGA_SRC_TRANS_ENABLE_A = 8,
++};
++
++enum e_rga_src_bic_coe_select {
++	RGA_SRC_BIC_COE_SELEC_CATROM = 0,
++	RGA_SRC_BIC_COE_SELEC_MITCHELL = 1,
++	RGA_SRC_BIC_COE_SELEC_HERMITE = 2,
++	RGA_SRC_BIC_COE_SELEC_BSPLINE = 3,
++};
++
++enum e_rga_dst_color_format {
++	RGA_DST_COLOR_FMT_ABGR888 = 0,
++	RGA_DST_COLOR_FMT_XBGR888 = 1,
++	RGA_DST_COLOR_FMT_RGB888 = 2,
++	RGA_DST_COLOR_FMT_RGB565 = 4,
++	RGA_DST_COLOR_FMT_ARGB1555 = 5,
++	RGA_DST_COLOR_FMT_ARGB4444 = 6,
++	RGA_DST_COLOR_FMT_YUV422SP = 8,
++	RGA_DST_COLOR_FMT_YUV422P = 9,
++	RGA_DST_COLOR_FMT_YUV420SP = 10,
++	RGA_DST_COLOR_FMT_YUV420P = 11,
++	RGA_DST_COLOR_FMT_MASK = 11,
++};
++
++enum e_rga_dst_color_swap {
++	RGA_DST_COLOR_RB_SWAP = 1,
++	RGA_DST_COLOR_ALPHA_SWAP = 2,
++	RGA_DST_COLOR_UV_SWAP = 4,
++};
++
++enum e_rga_src1_color_format {
++	RGA_SRC1_COLOR_FMT_ABGR888 = 0,
++	RGA_SRC1_COLOR_FMT_XBGR888 = 1,
++	RGA_SRC1_COLOR_FMT_RGB888 = 2,
++	RGA_SRC1_COLOR_FMT_RGB565 = 4,
++	RGA_SRC1_COLOR_FMT_ARGB1555 = 5,
++	RGA_SRC1_COLOR_FMT_ARGB4444 = 6,
++	RGA_SRC1_COLOR_FMT_MASK	 = 6,
++};
++
++enum e_rga_src1_color_swap {
++	RGA_SRC1_COLOR_RB_SWAP = 1,
++	RGA_SRC1_COLOR_ALPHA_SWAP = 2,
++};
++
++enum e_rga_dst_dither_down_mode {
++	RGA_DST_DITHER_MODE_888_TO_666 = 0,
++	RGA_DST_DITHER_MODE_888_TO_565 = 1,
++	RGA_DST_DITHER_MODE_888_TO_555 = 2,
++	RGA_DST_DITHER_MODE_888_TO_444 = 3,
++};
++
++enum e_rga_dst_csc_mode {
++	RGA_DST_CSC_MODE_BYPASS = 0,
++	RGA_DST_CSC_MODE_BT601_R0 = 1,
++	RGA_DST_CSC_MODE_BT601_R1 = 2,
++	RGA_DST_CSC_MODE_BT709_R0 = 3,
++};
++
++enum e_rga_alpha_rop_mode {
++	RGA_ALPHA_ROP_MODE_2 = 0,
++	RGA_ALPHA_ROP_MODE_3 = 1,
++	RGA_ALPHA_ROP_MODE_4 = 2,
++};
++
++enum e_rga_alpha_rop_select {
++	RGA_ALPHA_SELECT_ALPHA = 0,
++	RGA_ALPHA_SELECT_ROP = 1,
++};
++
++
++union rga_mode_ctrl {
++	unsigned int val;
++	struct {
++		/* [0:2] */
++		enum e_rga_render_mode	render:3;
++		/* [3:6] */
++		enum e_rga_bitblt_mode	bitblt:1;
++		enum e_rga_cf_rop4_pat	cf_rop4_pat:1;
++		unsigned int		alpha_zero_key:1;
++		unsigned int		gradient_sat:1;
++		/* [7:31] */
++		unsigned int		reserved:25;
++	} data;
++};	
++
++union rga_src_info {
++	unsigned int val;
++	struct {
++		/* [0:3] */
++		enum e_rga_src_color_format	format:4;
++		/* [4:7] */
++		enum e_rga_src_color_swap	swap:3;
++		unsigned int			cp_endian:1;
++		/* [8:17] */
++		enum e_rga_src_csc_mode		csc_mode:2;
++		enum e_rga_src_rot_mode		rot_mode:2;
++		enum e_rga_src_mirr_mode	mir_mode:2;
++		enum e_rga_src_hscl_mode	hscl_mode:2;
++		enum e_rga_src_vscl_mode	vscl_mode:2;
++		/* [18:22] */
++		unsigned int			trans_mode:1;
++		enum e_rga_src_trans_enable	trans_enable:4;
++		/* [23:25] */
++		unsigned int			dither_up_en:1;
++		enum e_rga_src_bic_coe_select	bic_coe_sel:2;
++		/* [26:31] */
++		unsigned int			reserved:6;
++	} data;
++};
++
++union rga_src_vir_info {
++	unsigned int val;
++	struct {
++		/* [0:15] */
++		unsigned int	vir_width:15;
++		unsigned int	reserved:1;
++		/* [16:25] */
++		unsigned int	vir_stride:10;
++		/* [26:31] */
++		unsigned int	reserved1:6;
++	} data;
++};
++
++union rga_src_act_info {
++	unsigned int val;
++	struct {
++		/* [0:15] */
++		unsigned int	act_width:13;
++		unsigned int	reserved:3;
++		/* [16:31] */
++		unsigned int	act_height:13;
++		unsigned int	reserved1:3;
++	} data;
++};
++
++union rga_src_x_factor {
++	unsigned int val;
++	struct {
++		/* [0:15] */
++		unsigned int	down_scale_factor:16;
++		/* [16:31] */
++		unsigned int	up_scale_factor:16;
++	} data;
++};
++
++union rga_src_y_factor {
++	unsigned int val;
++	struct {
++		/* [0:15] */
++		unsigned int	down_scale_factor:16;
++		/* [16:31] */
++		unsigned int	up_scale_factor:16;
++	} data;
++};
++
++/* Alpha / Red / Green / Blue */
++union rga_src_cp_gr_color {
++	unsigned int val;
++	struct {
++		/* [0:15] */
++		unsigned int	gradient_x:16;
++		/* [16:31] */
++		unsigned int	gradient_y:16;
++	} data;
++};
++
++union rga_src_transparency_color0 {
++	unsigned int val;
++	struct {
++		/* [0:7] */
++		unsigned int	trans_rmin:8;
++		/* [8:15] */
++		unsigned int	trans_gmin:8;
++		/* [16:23] */
++		unsigned int	trans_bmin:8;
++		/* [24:31] */
++		unsigned int	trans_amin:8;
++	} data;
++};
++
++union rga_src_transparency_color1 {
++	unsigned int val;
++	struct {
++		/* [0:7] */
++		unsigned int	trans_rmax:8;
++		/* [8:15] */
++		unsigned int	trans_gmax:8;
++		/* [16:23] */
++		unsigned int	trans_bmax:8;
++		/* [24:31] */
++		unsigned int	trans_amax:8;
++	} data;
++};
++
++union rga_dst_info {
++	unsigned int val;
++	struct {
++		/* [0:3] */
++		enum e_rga_dst_color_format	format:4;
++		/* [4:6] */
++		enum e_rga_dst_color_swap	swap:3;
++		/* [7:9] */
++		enum e_rga_src1_color_format	src1_format:3;
++		/* [10:11] */
++		enum e_rga_src1_color_swap	src1_swap:2;
++		/* [12:15] */
++		unsigned int			dither_up_en:1;
++		unsigned int			dither_down_en:1;
++		enum e_rga_dst_dither_down_mode	dither_down_mode:2;
++		/* [16:18] */
++		enum e_rga_dst_csc_mode		csc_mode:2;
++		unsigned int			csc_clip:1;
++		/* [19:31] */
++		unsigned int			reserved:13;
++	} data;
++};
++
++union rga_dst_vir_info {
++	unsigned int val;
++	struct {
++		/* [0:15] */
++		unsigned int	vir_stride:15;
++		unsigned int	reserved:1;
++		/* [16:31] */
++		unsigned int	src1_vir_stride:15;
++		unsigned int	reserved1:1;
++	} data;
++};
++
++union rga_dst_act_info {
++	unsigned int val;
++	struct {
++		/* [0:15] */
++		unsigned int	act_width:12;
++		unsigned int	reserved:4;
++		/* [16:31] */
++		unsigned int	act_height:12;
++		unsigned int	reserved1:4;
++	} data;
++};
++
++union rga_alpha_ctrl0 {
++	unsigned int val;
++	struct {
++		/* [0:3] */
++		unsigned int			rop_en:1;
++		enum e_rga_alpha_rop_select	rop_select:1;
++		enum e_rga_alpha_rop_mode	rop_mode:2;
++		/* [4:11] */
++		unsigned int			src_fading_val:8;
++		/* [12:20] */
++		unsigned int			dst_fading_val:8;
++		unsigned int			mask_endian:1;
++		/* [21:31] */
++		unsigned int			reserved:11;
++	} data;
++};
++
++union rga_alpha_ctrl1 {
++	unsigned int val;
++	struct {
++		/* [0:1] */
++		unsigned int	dst_color_m0:1;
++		unsigned int	src_color_m0:1;
++		/* [2:7] */
++		unsigned int	dst_factor_m0:3;
++		unsigned int	src_factor_m0:3;
++		/* [8:9] */
++		unsigned int	dst_alpha_cal_m0:1;
++		unsigned int	src_alpha_cal_m0:1;
++		/* [10:13] */
++		unsigned int	dst_blend_m0:2;
++		unsigned int	src_blend_m0:2;
++		/* [14:15] */
++		unsigned int	dst_alpha_m0:1;
++		unsigned int	src_alpha_m0:1;
++		/* [16:21] */
++		unsigned int	dst_factor_m1:3;
++		unsigned int	src_factor_m1:3;
++		/* [22:23] */
++		unsigned int	dst_alpha_cal_m1:1;
++		unsigned int	src_alpha_cal_m1:1;
++		/* [24:27] */
++		unsigned int	dst_blend_m1:2;
++		unsigned int	src_blend_m1:2;
++		/* [28:29] */
++		unsigned int	dst_alpha_m1:1;
++		unsigned int	src_alpha_m1:1;
++		/* [30:31] */
++		unsigned int	reserved:2;
++	} data;
++};
++
++union rga_fading_ctrl {
++	unsigned int val;
++	struct {
++		/* [0:7] */
++		unsigned int	fading_offset_r:8;
++		/* [8:15] */
++		unsigned int	fading_offset_g:8;
++		/* [16:23] */
++		unsigned int	fading_offset_b:8;
++		/* [24:31] */
++		unsigned int	fading_en:1;
++		unsigned int	reserved:7;
++	} data;
++};
++
++union rga_pat_con {
++	unsigned int val;
++	struct {
++		/* [0:7] */
++		unsigned int	width:8;
++		/* [8:15] */
++		unsigned int	height:8;
++		/* [16:23] */
++		unsigned int	offset_x:8;
++		/* [24:31] */
++		unsigned int	offset_y:8;
++	} data;
++};
++
++#endif
+--- a/rockchip/rockchip_drm.h
++++ b/rockchip/rockchip_drm.h
+@@ -61,13 +61,57 @@
+ 	uint64_t offset;
+ };
+ 
++struct drm_rockchip_rga_get_ver {
++	__u32   major;
++	__u32   minor;
++};
++
++struct drm_rockchip_rga_cmd {
++	__u32   offset;
++	__u32   data;
++};
++
++enum drm_rockchip_rga_buf_type {
++	RGA_BUF_TYPE_USERPTR = 1 << 31,
++	RGA_BUF_TYPE_GEMFD   = 1 << 30,
++};
++
++struct drm_rockchip_rga_userptr {
++	unsigned long userptr;
++	unsigned long size;
++};
++
++struct drm_rockchip_rga_set_cmdlist {
++	__u64		cmd;
++	__u64		cmd_buf;
++	__u32		cmd_nr;
++	__u32		cmd_buf_nr;
++	__u64		user_data;
++};
++
++struct drm_rockchip_rga_exec {
++	__u64		async;
++};
++
+ #define DRM_ROCKCHIP_GEM_CREATE	0x00
+ #define DRM_ROCKCHIP_GEM_MAP_OFFSET	0x01
++#define DRM_ROCKCHIP_RGA_GET_VER		0x20
++#define DRM_ROCKCHIP_RGA_SET_CMDLIST		0x21
++#define DRM_ROCKCHIP_RGA_EXEC			0x22
++
++#define DRM_IOCTL_ROCKCHIP_RGA_GET_VER		DRM_IOWR(DRM_COMMAND_BASE + \
++	DRM_ROCKCHIP_RGA_GET_VER, struct drm_rockchip_rga_get_ver)
++
++#define DRM_IOCTL_ROCKCHIP_RGA_SET_CMDLIST	DRM_IOWR(DRM_COMMAND_BASE + \
++	DRM_ROCKCHIP_RGA_SET_CMDLIST, struct drm_rockchip_rga_set_cmdlist)
++
++#define DRM_IOCTL_ROCKCHIP_RGA_EXEC		DRM_IOWR(DRM_COMMAND_BASE + \
++	DRM_ROCKCHIP_RGA_EXEC, struct drm_rockchip_rga_exec)
+ 
+-#define DRM_IOCTL_ROCKCHIP_GEM_CREATE DRM_IOWR(DRM_COMMAND_BASE + \
++#define DRM_IOCTL_ROCKCHIP_GEM_CREATE	DRM_IOWR(DRM_COMMAND_BASE + \
+ 		DRM_ROCKCHIP_GEM_CREATE, struct drm_rockchip_gem_create)
+ 
+-#define DRM_IOCTL_ROCKCHIP_GEM_MAP_OFFSET DRM_IOWR(DRM_COMMAND_BASE + \
++#define DRM_IOCTL_ROCKCHIP_GEM_MAP_OFFSET	DRM_IOWR(DRM_COMMAND_BASE + \
+ 		DRM_ROCKCHIP_GEM_MAP_OFFSET, struct drm_rockchip_gem_map_off)
+ 
+ #endif
+--- a/rockchip/rockchip_drmif.h
++++ b/rockchip/rockchip_drmif.h
+@@ -66,6 +66,8 @@
+  */
+ struct rockchip_bo *rockchip_bo_create(struct rockchip_device *dev,
+ 			size_t size, uint32_t flags);
++int rockchip_bo_get_info(struct rockchip_device *dev, uint32_t handle,
++			size_t *size, uint32_t *flags);
+ void rockchip_bo_destroy(struct rockchip_bo *bo);
+ struct rockchip_bo *rockchip_bo_from_name(struct rockchip_device *dev,
+ 			uint32_t name);
+--- /dev/null
++++ b/rockchip/rockchip_rga.c
+@@ -0,0 +1,945 @@
++/*
++ * Copyright (C) 2016 Fuzhou Rcockhip Electronics Co.Ltd
++ * Authors:
++ *	Yakir Yang <ykk@rock-chips.com>
++ *
++ * This program is free software; you can redistribute  it and/or modify it
++ * under  the terms of  the GNU General  Public License as published by the
++ * Free Software Foundation;  either version 2 of the  License, or (at your
++ * option) any later version.
++ *
++ */
++
++#ifdef HAVE_CONFIG_H
++#include "config.h"
++#endif
++
++#include <stdlib.h>
++#include <stdio.h>
++#include <string.h>
++#include <errno.h>
++
++#include <sys/mman.h>
++#include <linux/stddef.h>
++
++#include <xf86drm.h>
++
++#include "drm_fourcc.h"
++#include "libdrm_macros.h"
++
++#include "rockchip_drm.h"
++#include "rockchip_rga.h"
++#include "rga_reg.h"
++
++enum rga_base_addr_reg {
++	rga_dst = 0,
++	rga_src
++};
++
++enum e_rga_start_pos {
++	LT = 0,
++	LB = 1,
++	RT = 2,
++	RB = 3,
++};
++
++struct rga_addr_offset {
++	unsigned int y_off;
++	unsigned int u_off;
++	unsigned int v_off;
++};
++
++struct rga_corners_addr_offset {
++	struct rga_addr_offset left_top;
++	struct rga_addr_offset right_top;
++	struct rga_addr_offset left_bottom;
++	struct rga_addr_offset right_bottom;
++};
++
++static int rga_get_uv_factor(int drm_color_format)
++{
++	int ydiv = 1;
++
++        switch (drm_color_format) {
++	case DRM_FORMAT_NV16:
++	case DRM_FORMAT_NV61:
++	case DRM_FORMAT_YUV422:
++	case DRM_FORMAT_YVU422:
++		ydiv = 2;
++		break;
++
++	case DRM_FORMAT_YUV420:
++	case DRM_FORMAT_YVU420:
++	case DRM_FORMAT_NV21:
++	case DRM_FORMAT_NV12:
++		ydiv = 4;
++		break;
++
++	default:
++		break;
++	}
++
++	return ydiv;
++}
++
++static int rga_get_ydiv(int drm_color_format)
++{
++	int ydiv = 1;
++
++        switch (drm_color_format) {
++	case DRM_FORMAT_NV16:
++	case DRM_FORMAT_NV61:
++	case DRM_FORMAT_YUV422:
++	case DRM_FORMAT_YVU422:
++		ydiv = 1;
++		break;
++
++	case DRM_FORMAT_YUV420:
++	case DRM_FORMAT_YVU420:
++	case DRM_FORMAT_NV21:
++	case DRM_FORMAT_NV12:
++		ydiv = 2;
++		break;
++
++	default:
++		break;
++	}
++
++	return ydiv;
++}
++
++static int rga_get_xdiv(int drm_color_format)
++{
++	int xdiv = 2;
++
++        switch (drm_color_format) {
++	case DRM_FORMAT_NV16:
++	case DRM_FORMAT_NV61:
++	case DRM_FORMAT_NV21:
++	case DRM_FORMAT_NV12:
++		xdiv = 1;
++		break;
++
++	case DRM_FORMAT_YUV420:
++	case DRM_FORMAT_YVU420:
++	case DRM_FORMAT_YUV422:
++	case DRM_FORMAT_YVU422:
++		xdiv = 2;
++		break;
++
++	default:
++		break;
++	}
++
++	return xdiv;
++}
++
++static int rga_get_color_swap(int drm_color_format)
++{
++	unsigned int swap = 0;
++
++        switch (drm_color_format) {
++	case DRM_FORMAT_ABGR8888:
++	case DRM_FORMAT_XBGR8888:
++	case DRM_FORMAT_ABGR1555:
++	case DRM_FORMAT_ABGR4444:
++	case DRM_FORMAT_BGR888:
++	case DRM_FORMAT_BGR565:
++
++	case DRM_FORMAT_YVU422:
++	case DRM_FORMAT_YVU420:
++	case DRM_FORMAT_NV21:
++	case DRM_FORMAT_NV61:
++		break;
++	
++	case DRM_FORMAT_BGRA8888:
++	case DRM_FORMAT_BGRX8888:
++	case DRM_FORMAT_BGRA5551:
++	case DRM_FORMAT_BGRA4444:
++		swap |= RGA_SRC_COLOR_ALPHA_SWAP;
++		break;
++	
++	case DRM_FORMAT_RGBA8888:
++	case DRM_FORMAT_RGBX8888:
++	case DRM_FORMAT_RGBA5551:
++	case DRM_FORMAT_RGBA4444:
++		swap |= RGA_SRC_COLOR_ALPHA_SWAP;
++
++	case DRM_FORMAT_ARGB8888:
++	case DRM_FORMAT_XRGB8888:
++	case DRM_FORMAT_ARGB1555:
++	case DRM_FORMAT_ARGB4444:
++	case DRM_FORMAT_RGB888:
++	case DRM_FORMAT_RGB565:
++		swap |= RGA_SRC_COLOR_RB_SWAP;
++		break;
++
++	case DRM_FORMAT_YUV422:
++	case DRM_FORMAT_YUV420:
++	case DRM_FORMAT_NV12:
++	case DRM_FORMAT_NV16:
++		swap |= RGA_SRC_COLOR_UV_SWAP;
++		break;
++	
++	default:
++		printf("Unsupport input color format %d\n", drm_color_format);
++		break;
++	}
++
++	return swap;
++}
++
++static int rga_get_color_format(int drm_color_format)
++{
++        switch (drm_color_format) {
++	case DRM_FORMAT_ARGB8888:
++	case DRM_FORMAT_ABGR8888:
++        case DRM_FORMAT_BGRA8888:
++        case DRM_FORMAT_RGBA8888:
++		return RGA_SRC_COLOR_FMT_ABGR8888;
++
++        case DRM_FORMAT_XRGB8888:
++        case DRM_FORMAT_XBGR8888:
++        case DRM_FORMAT_RGBX8888:
++        case DRM_FORMAT_BGRX8888:
++		return RGA_SRC_COLOR_FMT_XBGR8888;
++
++        case DRM_FORMAT_RGB888:
++        case DRM_FORMAT_BGR888:
++		return RGA_SRC_COLOR_FMT_RGB888;
++
++        case DRM_FORMAT_RGB565:
++        case DRM_FORMAT_BGR565:
++		return RGA_SRC_COLOR_FMT_RGB565;
++
++        case DRM_FORMAT_ARGB1555:
++        case DRM_FORMAT_ABGR1555:
++        case DRM_FORMAT_RGBA5551:
++        case DRM_FORMAT_BGRA5551:
++		return RGA_SRC_COLOR_FMT_ARGB1555;
++
++        case DRM_FORMAT_ARGB4444:
++        case DRM_FORMAT_ABGR4444:
++        case DRM_FORMAT_RGBA4444:
++        case DRM_FORMAT_BGRA4444:
++		return RGA_SRC_COLOR_FMT_ARGB4444;
++
++        case DRM_FORMAT_NV16:
++        case DRM_FORMAT_NV61:
++		return RGA_SRC_COLOR_FMT_YUV422SP;
++
++        case DRM_FORMAT_YUV422:
++        case DRM_FORMAT_YVU422:
++		return RGA_SRC_COLOR_FMT_YUV422P;
++
++        case DRM_FORMAT_NV12:
++        case DRM_FORMAT_NV21:
++		return RGA_SRC_COLOR_FMT_YUV420SP;
++
++        case DRM_FORMAT_YUV420:
++        case DRM_FORMAT_YVU420:
++		return RGA_SRC_COLOR_FMT_YUV420P;
++
++        default:
++                return -EINVAL;
++        };
++}
++
++static unsigned int rga_get_scaling(unsigned int src, unsigned int dst)
++{
++	/*
++	 * The rga hw scaling factor is a normalized inverse of the scaling factor.
++	 * For example: When source width is 100 and destination width is 200
++	 * (scaling of 2x), then the hw factor is NC * 100 / 200.
++	 * The normalization factor (NC) is 2^16 = 0x10000.
++	 */
++
++	return (src > dst) ? ((dst << 16) / src) : ((src << 16) / dst);
++}
++
++static struct rga_corners_addr_offset
++rga_get_addr_offset(struct rga_image *img, unsigned int x, unsigned int y,
++		    unsigned int w, unsigned int h)
++{
++	struct rga_corners_addr_offset offsets;
++	struct rga_addr_offset *lt, *lb, *rt, *rb;
++	unsigned int x_div = 0, y_div = 0, uv_stride = 0, pixel_width = 0, uv_factor = 0;
++
++	lt = &offsets.left_top;
++	lb = &offsets.left_bottom;
++	rt = &offsets.right_top;
++	rb = &offsets.right_bottom;
++
++	x_div = rga_get_xdiv(img->color_mode);
++	y_div = rga_get_ydiv(img->color_mode);
++	uv_factor = rga_get_uv_factor(img->color_mode);
++	uv_stride = img->stride / x_div;
++	pixel_width = img->stride / img->width;
++
++	lt->y_off = y * img->stride + x * pixel_width;
++	lt->u_off = img->width * img->height + (y / y_div) * uv_stride + x / x_div;
++	lt->v_off = lt->u_off + img->width * img->height / uv_factor;
++
++	lb->y_off = lt->y_off + (h - 1) * img->stride;
++	lb->u_off = lt->u_off + (h / y_div - 1) * uv_stride;
++	lb->v_off = lt->v_off + (h / y_div - 1) * uv_stride;
++
++	rt->y_off = lt->y_off + (w - 1) * pixel_width;
++	rt->u_off = lt->u_off + w / x_div - 1;
++	rt->v_off = lt->v_off + w / x_div - 1;
++
++	rb->y_off = lb->y_off + (w - 1) * pixel_width;
++	rb->u_off = lb->u_off + w / x_div - 1;
++	rb->v_off = lb->v_off + w / x_div - 1;
++
++	return offsets;
++}
++
++static struct rga_addr_offset *
++rga_lookup_draw_pos(struct rga_corners_addr_offset *offsets,
++		    enum e_rga_src_rot_mode rotate_mode,
++		    enum e_rga_src_mirr_mode mirr_mode)
++{
++	static enum e_rga_start_pos rot_mir_point_matrix[4][4] = {
++		{ LT, RT, LB, RB, },
++		{ RT, LT, RB, LB, },
++		{ RB, LB, RT, LT, },
++		{ LB, RB, LT, RT, },
++	};
++
++	if (offsets == NULL)
++		return NULL;
++
++	switch (rot_mir_point_matrix[rotate_mode][mirr_mode]) {
++	case LT:
++		return &offsets->left_top;
++	case LB:
++		return &offsets->left_bottom;
++	case RT:
++		return &offsets->right_top;
++	case RB:
++		return &offsets->right_bottom;
++	};
++
++	return NULL;
++}
++
++/*
++ * rga_add_cmd - set given command and value to user side command buffer.
++ *
++ * @ctx: a pointer to rga_context structure.
++ * @cmd: command data.
++ * @value: value data.
++ */
++static int rga_add_cmd(struct rga_context *ctx, unsigned long cmd,
++			unsigned long value)
++{
++	switch (cmd & ~(RGA_IMGBUF_USERPTR)) {
++	case SRC_Y_RGB_BASE_ADDR:
++	case SRC_CB_BASE_ADDR:
++	case SRC_CR_BASE_ADDR:
++	case SRC1_RGB_BASE_ADDR:
++	case DST_Y_RGB_BASE_ADDR:
++	case DST_CB_BASE_ADDR:
++	case DST_CR_BASE_ADDR:
++		if (ctx->cmd_buf_nr >= RGA_MAX_GEM_CMD_NR) {
++			fprintf(stderr, "Overflow cmd_gem size.\n");
++			return -EINVAL;
++		}
++
++		ctx->cmd_buf[ctx->cmd_buf_nr].offset = cmd;
++		ctx->cmd_buf[ctx->cmd_buf_nr].data = value;
++		ctx->cmd_buf_nr++;
++
++		break;
++	default:
++		if (ctx->cmd_nr >= RGA_MAX_CMD_NR) {
++			fprintf(stderr, "Overflow cmd size.\n");
++			return -EINVAL;
++		}
++
++		ctx->cmd[ctx->cmd_nr].offset = cmd;
++		ctx->cmd[ctx->cmd_nr].data = value;
++		ctx->cmd_nr++;
++
++		break;
++	}
++
++	return 0;
++}
++
++/*
++ * rga_add_base_addr - helper function to set dst/src base address register.
++ *
++ * @ctx: a pointer to rga_context structure.
++ * @img: a pointer to the dst/src rga_image structure.
++ * @reg: the register that should be set.
++ */
++static void rga_add_base_addr(struct rga_context *ctx, struct rga_image *img,
++			      enum rga_base_addr_reg reg)
++{
++	const unsigned long cmd = (reg == rga_dst) ?
++		DST_Y_RGB_BASE_ADDR : SRC_Y_RGB_BASE_ADDR;
++
++	if (img->buf_type == RGA_IMGBUF_USERPTR) {
++		fprintf(stderr, "Can't support userptr now!\n");
++		return;
++	} else {
++		rga_add_cmd(ctx, cmd | RGA_BUF_TYPE_GEMFD, img->bo[0]);
++	}
++}
++
++/*
++ * rga_reset - reset rga hardware.
++ *
++ * @ctx: a pointer to rga_context structure.
++ *
++ */
++static void rga_reset(struct rga_context *ctx)
++{
++	ctx->cmd_nr = 0;
++	ctx->cmd_buf_nr = 0;
++}
++
++/*
++ * rga_flush - submit all commands and values in user side command buffer
++ *		to command queue aware of rga dma.
++ *
++ * @ctx: a pointer to rga_context structure.
++ *
++ * This function should be called after all commands and values to user
++ * side command buffer are set. It submits that buffer to the kernel side driver.
++ */
++static int rga_flush(struct rga_context *ctx)
++{
++	int ret;
++	struct drm_rockchip_rga_set_cmdlist cmdlist = {0};
++
++	if (ctx->cmd_nr == 0 && ctx->cmd_buf_nr == 0)
++		return -1;
++
++	if (ctx->cmdlist_nr >= RGA_MAX_CMD_LIST_NR) {
++		fprintf(stderr, "Overflow cmdlist.\n");
++		return -EINVAL;
++	}
++
++	cmdlist.cmd = (uint64_t)(uintptr_t)&ctx->cmd[0];
++	cmdlist.cmd_buf = (uint64_t)(uintptr_t)&ctx->cmd_buf[0];
++	cmdlist.cmd_nr = ctx->cmd_nr;
++	cmdlist.cmd_buf_nr = ctx->cmd_buf_nr;
++
++	ctx->cmd_nr = 0;
++	ctx->cmd_buf_nr = 0;
++
++	ret = drmIoctl(ctx->fd, DRM_IOCTL_ROCKCHIP_RGA_SET_CMDLIST, &cmdlist);
++	if (ret < 0) {
++		fprintf(stderr, "failed to set cmdlist.\n");
++		return ret;
++	}
++
++	ctx->cmdlist_nr++;
++
++	return ret;
++}
++
++/**
++ * rga_init - create a new rga context and get hardware version.
++ *
++ * fd: a file descriptor to an opened drm device.
++ */
++struct rga_context *rga_init(int fd)
++{
++	struct drm_rockchip_rga_get_ver ver;
++	struct rga_context *ctx;
++	int ret;
++
++	ctx = calloc(1, sizeof(*ctx));
++	if (!ctx) {
++		fprintf(stderr, "failed to allocate context.\n");
++		return NULL;
++	}
++
++	ctx->fd = fd;
++
++	ret = drmIoctl(fd, DRM_IOCTL_ROCKCHIP_RGA_GET_VER, &ver);
++	if (ret < 0) {
++		fprintf(stderr, "failed to get version.\n");
++		free(ctx);
++		return NULL;
++	}
++
++	ctx->major = ver.major;
++	ctx->minor = ver.minor;
++
++	return ctx;
++}
++
++void rga_fini(struct rga_context *ctx)
++{
++	if (ctx)
++		free(ctx);
++}
++
++/**
++ * rga_exec - start the dma to process all commands summited by rga_flush().
++ *
++ * @ctx: a pointer to rga_context structure.
++ */
++int rga_exec(struct rga_context *ctx)
++{
++	struct drm_rockchip_rga_exec exec;
++	int ret;
++
++	if (ctx->cmdlist_nr == 0)
++		return -EINVAL;
++
++	exec.async = 0;
++
++	ret = drmIoctl(ctx->fd, DRM_IOCTL_ROCKCHIP_RGA_EXEC, &exec);
++	if (ret < 0) {
++		fprintf(stderr, "failed to execute.\n");
++		return ret;
++	}
++
++	ctx->cmdlist_nr = 0;
++
++	return ret;
++}
++
++/**
++ * rga_solid_fill - fill given buffer with given color data.
++ *
++ * @ctx: a pointer to rga_context structure.
++ * @img: a pointer to rga_image structure including image and buffer
++ *	information.
++ * @x: x start position to buffer filled with given color data.
++ * @y: y start position to buffer filled with given color data.
++ * @w: width value to buffer filled with given color data.
++ * @h: height value to buffer filled with given color data.
++ */
++int rga_solid_fill(struct rga_context *ctx, struct rga_image *img,
++		   unsigned int x, unsigned int y, unsigned int w,
++		   unsigned int h)
++{
++	union rga_mode_ctrl mode;
++	union rga_dst_info dst_info;
++	union rga_dst_vir_info dst_vir_info;
++	union rga_dst_act_info dst_act_info;
++
++	struct rga_corners_addr_offset offsets;
++
++	if (x + w > img->width)
++		w = img->width - x;
++	if (y + h > img->height)
++		h = img->height - y;
++
++	/* Init the operation registers to zero */
++	mode.val = 0;
++	dst_info.val = 0;
++	dst_act_info.val = 0;
++	dst_vir_info.val = 0;
++
++	/*
++	 * Configure the RGA operation mode registers:
++	 *   Bitblt Mode,
++	 *   SRC + DST=> DST,
++	 *   Solid color fill,
++	 *   Gradient status is not-clip,
++	 */
++	mode.data.gradient_sat = 1;
++	mode.data.render = RGA_MODE_RENDER_BITBLT;
++	mode.data.render = RGA_MODE_RENDER_RECTANGLE_FILL;
++	mode.data.cf_rop4_pat = RGA_MODE_CF_ROP4_SOLID,
++	mode.data.bitblt = RGA_MODE_BITBLT_MODE_SRC_TO_DST;
++
++	rga_add_cmd(ctx, MODE_CTRL, mode.val);
++
++
++	/*
++	 * Translate the DRM color format to RGA color format
++	 */
++	dst_info.data.format = rga_get_color_format(img->color_mode);
++	dst_info.data.swap   = rga_get_color_swap(img->color_mode);
++	dst_info.data.csc_mode = RGA_DST_CSC_MODE_BT601_R0;
++
++	if (dst_info.data.format == RGA_DST_COLOR_FMT_YUV422SP ||
++	    dst_info.data.format == RGA_DST_COLOR_FMT_YUV422P ||
++	    dst_info.data.format == RGA_DST_COLOR_FMT_YUV420SP ||
++	    dst_info.data.format == RGA_DST_COLOR_FMT_YUV420P)
++		dst_info.data.csc_mode = RGA_DST_CSC_MODE_BT601_R0;
++
++	rga_add_cmd(ctx, DST_INFO, dst_info.val);
++
++
++	/*
++	 * Configure the target color to foreground color.
++	 */
++	rga_add_cmd(ctx, SRC_FG_COLOR, img->fill_color);
++
++
++	/*
++	 * Cacluate the framebuffer virtual strides and active size,
++	 * note that the step of vir_stride is 4 byte words
++	 */
++	dst_vir_info.data.vir_stride = img->stride >> 2;
++	dst_act_info.data.act_height = h - 1;
++	dst_act_info.data.act_width = w - 1;
++
++	rga_add_cmd(ctx, DST_VIR_INFO, dst_vir_info.val);
++	rga_add_cmd(ctx, DST_ACT_INFO, dst_act_info.val);
++
++
++	/*
++	 * Configure the dest framebuffer base address with pixel offset.
++	 */
++	offsets = rga_get_addr_offset(img, x, y, w, h);
++
++	rga_add_cmd(ctx, DST_Y_RGB_BASE_ADDR, offsets.left_top.y_off);
++	rga_add_cmd(ctx, DST_CB_BASE_ADDR, offsets.left_top.u_off);
++	rga_add_cmd(ctx, DST_CR_BASE_ADDR, offsets.left_top.v_off);
++
++	rga_add_base_addr(ctx, img, rga_dst);
++
++
++	/* Start to flush RGA device */
++	rga_flush(ctx);
++
++	return 0;
++}
++
++int rga_multiple_transform(struct rga_context *ctx, struct rga_image *src,
++			   struct rga_image *dst, unsigned int src_x,
++			   unsigned int src_y, unsigned int src_w,
++			   unsigned int src_h, unsigned int dst_x,
++			   unsigned int dst_y, unsigned int dst_w,
++			   unsigned int dst_h, unsigned int degree,
++			   unsigned int x_mirr, unsigned int y_mirr)
++{
++	union rga_mode_ctrl mode;
++	union rga_src_info src_info;
++	union rga_dst_info dst_info;
++	union rga_src_x_factor x_factor;
++	union rga_src_y_factor y_factor;
++	union rga_src_vir_info src_vir_info;
++	union rga_src_act_info src_act_info;
++	union rga_dst_vir_info dst_vir_info;
++	union rga_dst_act_info dst_act_info;
++
++	struct rga_addr_offset *dst_offset;
++	struct rga_corners_addr_offset offsets;
++	struct rga_corners_addr_offset src_offsets;
++
++	unsigned int scale_dst_w, scale_dst_h;
++
++	if (degree != 0 && degree != 90 && degree != 180 && degree != 270) {
++		fprintf(stderr, "invalid rotate degree.\n");
++		rga_reset(ctx);
++		return -EINVAL;
++	}
++
++	if (src_w < 32 || src_h < 34 || dst_w < 32 || dst_h < 34) {
++		fprintf(stderr, "invalid src/dst width or height.\n");
++		rga_reset(ctx);
++		return -EINVAL;
++	}
++
++	if (src_x + src_w > src->width)
++		src_w = src->width - src_x;
++	if (src_y + src_h > src->height)
++		src_h = src->height - src_y;
++
++	if (dst_x + dst_w > dst->width)
++		dst_w = dst->width - dst_x;
++	if (dst_y + dst_h > dst->height)
++		dst_h = dst->height - dst_y;
++
++	if (src_w <= 0 || src_h <= 0 || dst_w <= 0 || dst_h <= 0) {
++		fprintf(stderr, "invalid width or height.\n");
++		rga_reset(ctx);
++		return -EINVAL;
++	}
++
++	/* Init RGA registers values to zero */
++	mode.val = 0;
++	x_factor.val = 0;
++	y_factor.val = 0;
++	src_info.val = 0;
++	dst_info.val = 0;
++	src_vir_info.val = 0;
++	dst_vir_info.val = 0;
++	src_act_info.val = 0;
++	dst_act_info.val = 0;
++
++	/*
++	 * Configure the RGA operation mode registers:
++	 *   Bitblt Mode,
++	 *   SRC => DST,
++	 *   Gradient status is not-clip,
++	 */
++	mode.data.gradient_sat = 1;
++	mode.data.render = RGA_MODE_RENDER_BITBLT;
++	mode.data.bitblt = RGA_MODE_BITBLT_MODE_SRC_TO_DST;
++	rga_add_cmd(ctx, MODE_CTRL, mode.val);
++
++	/*
++	 * Translate the DRM color format to RGA color format, and
++	 * configure the actual rotate / mirr mode.
++	 */
++	src_info.data.format   = rga_get_color_format(src->color_mode);
++	dst_info.data.format   = rga_get_color_format(dst->color_mode);
++	src_info.data.swap     = rga_get_color_swap(src->color_mode);
++	dst_info.data.swap     = rga_get_color_swap(dst->color_mode);
++
++	if (dst_info.data.format == RGA_DST_COLOR_FMT_YUV422SP ||
++	    dst_info.data.format == RGA_DST_COLOR_FMT_YUV422P ||
++	    dst_info.data.format == RGA_DST_COLOR_FMT_YUV420SP ||
++	    dst_info.data.format == RGA_DST_COLOR_FMT_YUV420P)
++		dst_info.data.csc_mode = RGA_DST_CSC_MODE_BT601_R0;
++
++	switch (degree) {
++	case 90:
++		src_info.data.rot_mode = RGA_SRC_ROT_MODE_90_DEGREE;
++		break;
++	case 180:
++		src_info.data.rot_mode = RGA_SRC_ROT_MODE_180_DEGREE;
++		break;
++	case 270:
++		src_info.data.rot_mode = RGA_SRC_ROT_MODE_270_DEGREE;
++		break;
++	default:
++		src_info.data.rot_mode = RGA_SRC_ROT_MODE_0_DEGREE;
++		break;
++	}
++
++	if (x_mirr)
++		src_info.data.mir_mode |= RGA_SRC_MIRR_MODE_X;
++	if (y_mirr)
++		src_info.data.mir_mode |= RGA_SRC_MIRR_MODE_Y;
++
++	/*
++	 * Cacluate the up/down scaling mode/factor.
++	 *
++	 * RGA used to scale the picture first, and then rotate second,
++	 * so we need to swap the w/h when rotate degree is 90/270.
++	 */
++	if (src_info.data.rot_mode == RGA_SRC_ROT_MODE_90_DEGREE ||
++	    src_info.data.rot_mode == RGA_SRC_ROT_MODE_270_DEGREE) {
++		if (ctx->major == 0 || ctx->minor == 0) {
++			if (dst_w == src_h)
++				src_h -= 8;
++			if (abs(src_w - dst_h) < 16)
++				src_w -= 16;
++		}
++		
++		scale_dst_h = dst_w;
++		scale_dst_w = dst_h;
++	} else {
++		scale_dst_w = dst_w;
++		scale_dst_h = dst_h;
++	}
++
++	if (src_w == scale_dst_w) {
++		src_info.data.hscl_mode = RGA_SRC_HSCL_MODE_NO;
++		x_factor.val = 0;
++	} else if(src_w > scale_dst_w) {
++		src_info.data.hscl_mode = RGA_SRC_HSCL_MODE_DOWN;
++		x_factor.data.down_scale_factor = rga_get_scaling(src_w, scale_dst_w) + 1;
++	} else {
++		src_info.data.hscl_mode = RGA_SRC_HSCL_MODE_UP;
++		x_factor.data.up_scale_factor = rga_get_scaling(src_w - 1, scale_dst_w - 1);
++	}
++
++	if (src_h == scale_dst_h) {
++		src_info.data.vscl_mode = RGA_SRC_VSCL_MODE_NO;
++		y_factor.val = 0;
++	} else if(src_h > scale_dst_h) {
++		src_info.data.vscl_mode = RGA_SRC_VSCL_MODE_DOWN;
++		y_factor.data.down_scale_factor = rga_get_scaling(src_h, scale_dst_h) + 1;
++	} else {
++		src_info.data.vscl_mode = RGA_SRC_VSCL_MODE_UP;
++		y_factor.data.up_scale_factor = rga_get_scaling(src_h - 1, scale_dst_h - 1);
++	}
++
++	rga_add_cmd(ctx, SRC_X_FACTOR, x_factor.val);
++	rga_add_cmd(ctx, SRC_Y_FACTOR, y_factor.val);
++
++	if (src_info.data.format == RGA_SRC_COLOR_FMT_YUV422SP ||
++	    src_info.data.format == RGA_SRC_COLOR_FMT_YUV422P ||
++	    src_info.data.format == RGA_SRC_COLOR_FMT_YUV420SP ||
++	    src_info.data.format == RGA_SRC_COLOR_FMT_YUV420P)
++		src_info.data.csc_mode = RGA_SRC_CSC_MODE_BT601_R0;
++	
++	rga_add_cmd(ctx, SRC_INFO, src_info.val);
++	rga_add_cmd(ctx, DST_INFO, dst_info.val);
++
++
++	/*
++	 * Cacluate the framebuffer virtual strides and active size,
++	 * note that the step of vir_stride / vir_width is 4 byte words
++	 */
++	src_vir_info.data.vir_stride = src->stride >> 2;
++	src_vir_info.data.vir_width = src->stride >> 2;
++
++	src_act_info.data.act_height = src_h - 1;
++	src_act_info.data.act_width = src_w - 1;
++
++	dst_vir_info.data.vir_stride = dst->stride >> 2;
++	dst_act_info.data.act_height = dst_h - 1;
++	dst_act_info.data.act_width = dst_w - 1;
++
++	rga_add_cmd(ctx, SRC_VIR_INFO, src_vir_info.val);
++	rga_add_cmd(ctx, SRC_ACT_INFO, src_act_info.val);
++
++	rga_add_cmd(ctx, DST_VIR_INFO, dst_vir_info.val);
++	rga_add_cmd(ctx, DST_ACT_INFO, dst_act_info.val);
++
++
++	/*
++	 * Cacluate the source framebuffer base address with offset pixel.
++	 */
++	src_offsets = rga_get_addr_offset(src, src_x, src_y, src_w, src_h);
++
++	rga_add_cmd(ctx, SRC_Y_RGB_BASE_ADDR, src_offsets.left_top.y_off);
++	rga_add_cmd(ctx, SRC_CB_BASE_ADDR, src_offsets.left_top.u_off);
++	rga_add_cmd(ctx, SRC_CR_BASE_ADDR, src_offsets.left_top.v_off);
++
++	rga_add_base_addr(ctx, src, rga_src);
++
++
++	/*
++	 * Configure the dest framebuffer base address with pixel offset.
++	 */
++	offsets = rga_get_addr_offset(dst, dst_x, dst_y, dst_w, dst_h);
++	dst_offset = rga_lookup_draw_pos(&offsets, src_info.data.rot_mode,
++					 src_info.data.mir_mode);
++
++	rga_add_cmd(ctx, DST_Y_RGB_BASE_ADDR, dst_offset->y_off);
++	rga_add_cmd(ctx, DST_CB_BASE_ADDR, dst_offset->u_off);
++	rga_add_cmd(ctx, DST_CR_BASE_ADDR, dst_offset->v_off);
++
++	rga_add_base_addr(ctx, dst, rga_dst);
++
++
++	/* Start to flush RGA device */
++	rga_flush(ctx);
++
++	return 0;
++}
++
++/**
++ * rga_copy_with_rorate - copy contents in source buffer to destination buffer
++ *	rotate properly.
++ *
++ * @ctx: a pointer to rga_context structure.
++ * @src: a pointer to rga_image structure including image and buffer
++ *	information to source.
++ * @dst: a pointer to rga_image structure including image and buffer
++ *	information to destination.
++ * @src_x: x start position to source buffer.
++ * @src_y: y start position to source buffer.
++ * @src_w: width value to source buffer.
++ * @src_h: height value to source buffer.
++ * @dst_x: x start position to destination buffer.
++ * @dst_y: y start position to destination buffer.
++ * @dst_w: width value to destination buffer.
++ * @dst_h: height value to destination buffer.
++ * @degree: rotate degree (0, 90, 180, 270)
++ */
++int rga_copy_with_rotate(struct rga_context *ctx, struct rga_image *src,
++			 struct rga_image *dst, unsigned int src_x,
++			 unsigned int src_y, unsigned int src_w,
++			 unsigned int src_h, unsigned int dst_x,
++			 unsigned int dst_y, unsigned int dst_w,
++			 unsigned int dst_h, unsigned int degree)
++{
++	if (degree != 0 && degree != 90 && degree != 180 && degree != 270) {
++		fprintf(stderr, "invalid rotate degree %d.\n", degree);
++		return -EINVAL;
++	}
++
++	return rga_multiple_transform(ctx, src, dst, src_x, src_y, src_w,
++				      src_h, dst_x, dst_y, dst_w, dst_h,
++				      degree, 0, 0);
++}
++
++/**
++ * rga_copy_with_scale - copy contents in source buffer to destination buffer
++ *	scaling up or down properly.
++ *
++ * @ctx: a pointer to rga_context structure.
++ * @src: a pointer to rga_image structure including image and buffer
++ *	information to source.
++ * @dst: a pointer to rga_image structure including image and buffer
++ *	information to destination.
++ * @src_x: x start position to source buffer.
++ * @src_y: y start position to source buffer.
++ * @src_w: width value to source buffer.
++ * @src_h: height value to source buffer.
++ * @dst_x: x start position to destination buffer.
++ * @dst_y: y start position to destination buffer.
++ * @dst_w: width value to destination buffer.
++ * @dst_h: height value to destination buffer.
++ */
++int rga_copy_with_scale(struct rga_context *ctx, struct rga_image *src,
++			struct rga_image *dst, unsigned int src_x,
++			unsigned int src_y, unsigned int src_w,
++			unsigned int src_h, unsigned int dst_x,
++			unsigned int dst_y, unsigned int dst_w,
++			unsigned int dst_h)
++{
++
++	return rga_multiple_transform(ctx, src, dst, src_x, src_y, src_w,
++				      src_h, dst_x, dst_y, dst_w, dst_h,
++				      0, 0, 0);
++}
++
++/**
++ * rga_copy - copy contents in source buffer to destination buffer.
++ *
++ * @ctx: a pointer to rga_context structure.
++ * @src: a pointer to rga_image structure including image and buffer
++ *	information to source.
++ * @dst: a pointer to rga_image structure including image and buffer
++ *	information to destination.
++ * @src_x: x start position to source buffer.
++ * @src_y: y start position to source buffer.
++ * @dst_x: x start position to destination buffer.
++ * @dst_y: y start position to destination buffer.
++ * @w: width value to source and destination buffers.
++ * @h: height value to source and destination buffers.
++ */
++int rga_copy(struct rga_context *ctx, struct rga_image *src,
++	     struct rga_image *dst, unsigned int src_x, unsigned int src_y,
++	     unsigned int dst_x, unsigned dst_y, unsigned int w,
++	     unsigned int h)
++{
++	unsigned int src_w = 0, src_h = 0, dst_w = 0, dst_h = 0;
++
++	src_w = w;
++	src_h = h;
++	if (src_x + src->width > w)
++		src_w = src->width - src_x;
++	if (src_y + src->height > h)
++		src_h = src->height - src_y;
++
++	dst_w = w;
++	dst_h = w;
++	if (dst_x + dst->width > w)
++		dst_w = dst->width - dst_x;
++	if (dst_y + dst->height > h)
++		dst_h = dst->height - dst_y;
++
++	w = (src_w < dst_w) ? src_w : dst_w;
++	h = (src_h < dst_h) ? src_h : dst_h;
++
++	if (w <= 0 || h <= 0) {
++		fprintf(stderr, "invalid width or height.\n");
++		rga_reset(ctx);
++		return -EINVAL;
++	}
++
++
++	return rga_multiple_transform(ctx, src, dst, src_x, src_y, src_w,
++				      src_h, dst_x, dst_y, dst_w, dst_h,
++				      0, 0, 0);
++}
+--- /dev/null
++++ b/rockchip/rockchip_rga.h
+@@ -0,0 +1,85 @@
++/*
++ * Copyright (C) 2016 Fuzhou Rockchip lectronics Co.Ltd
++ * Authors:
++ *	Yakir Yang <ykk@rock-chips.com>
++ *
++ * This program is free software; you can redistribute  it and/or modify it
++ * under  the terms of  the GNU General  Public License as published by the
++ * Free Software Foundation;  either version 2 of the  License, or (at your
++ * option) any later version.
++ *
++ */
++
++#ifndef _FIMrga_H_
++#define _FIMrga_H_
++
++enum e_rga_buf_type {
++	RGA_IMGBUF_COLOR,
++	RGA_IMGBUF_GEM,
++	RGA_IMGBUF_USERPTR,
++};
++
++#define RGA_PLANE_MAX_NR	3
++#define RGA_MAX_CMD_NR		32
++#define RGA_MAX_GEM_CMD_NR	10
++#define RGA_MAX_CMD_LIST_NR     64
++
++struct rga_image {
++	unsigned int			color_mode;
++	unsigned int			width;
++	unsigned int			height;
++	unsigned int			stride;
++	unsigned int			fill_color;
++	enum e_rga_buf_type		buf_type;
++	unsigned int			bo[RGA_PLANE_MAX_NR];
++	struct drm_rockchip_rga_userptr	user_ptr[RGA_PLANE_MAX_NR];
++};
++
++struct rga_context {
++	int				fd;
++	unsigned int			major;
++	unsigned int			minor;
++	struct drm_rockchip_rga_cmd	cmd[RGA_MAX_CMD_NR];
++	struct drm_rockchip_rga_cmd	cmd_buf[RGA_MAX_GEM_CMD_NR];
++	unsigned int			cmd_nr;
++	unsigned int			cmd_buf_nr;
++	unsigned int			cmdlist_nr;
++};
++
++struct rga_context *rga_init(int fd);
++
++void rga_fini(struct rga_context *ctx);
++
++int rga_exec(struct rga_context *ctx);
++
++int rga_solid_fill(struct rga_context *ctx, struct rga_image *img,
++		   unsigned int x, unsigned int y, unsigned int w,
++		   unsigned int h);
++
++int rga_copy(struct rga_context *ctx, struct rga_image *src,
++	     struct rga_image *dst, unsigned int src_x,
++	     unsigned int src_y, unsigned int dst_x, unsigned int dst_y,
++	     unsigned int w, unsigned int h);
++
++int rga_copy_with_scale(struct rga_context *ctx, struct rga_image *src,
++			struct rga_image *dst, unsigned int src_x,
++			unsigned int src_y, unsigned int src_w,
++			unsigned int src_h, unsigned int dst_x,
++			unsigned int dst_y, unsigned int dst_w,
++			unsigned int dst_h);
++
++int rga_copy_with_rotate(struct rga_context *ctx, struct rga_image *src,
++			 struct rga_image *dst, unsigned int src_x,
++			 unsigned int src_y, unsigned int src_w,
++			 unsigned int src_h, unsigned int dst_x,
++			 unsigned int dst_y, unsigned int dst_w,
++			 unsigned int dst_h, unsigned int degree);
++
++int rga_multiple_transform(struct rga_context *ctx, struct rga_image *src,
++			   struct rga_image *dst, unsigned int src_x,
++			   unsigned int src_y, unsigned int src_w,
++			   unsigned int src_h, unsigned int dst_x,
++			   unsigned int dst_y, unsigned int dst_w,
++			   unsigned int dst_h, unsigned int degree,
++			   unsigned int x_mirr, unsigned int y_mirr);
++#endif /* _RGA_H_ */
+--- a/tests/Makefile.am
++++ b/tests/Makefile.am
+@@ -22,6 +22,10 @@
+ SUBDIRS += tegra
+ endif
+ 
++if HAVE_ROCKCHIP
++SUBDIRS += rockchip
++endif
++
+ AM_CFLAGS = \
+ 	$(WARN_CFLAGS)\
+ 	-I $(top_srcdir)/include/drm \
+--- /dev/null
++++ b/tests/rockchip/Makefile.am
+@@ -0,0 +1,25 @@
++AM_CFLAGS = \
++	$(WARN_CFLAGS)\
++	-I $(top_srcdir)/include/drm \
++	-I $(top_srcdir)/libkms/ \
++	-I $(top_srcdir)/rockchip \
++	-I $(top_srcdir)
++
++if HAVE_LIBKMS
++if HAVE_INSTALL_TESTS
++bin_PROGRAMS = \
++	rockchip_rga_test
++else
++noinst_PROGRAMS = \
++	rockchip_rga_test
++endif
++endif
++
++rockchip_rga_test_LDADD = \
++	$(top_builddir)/libdrm.la \
++	$(top_builddir)/libkms/libkms.la \
++	$(top_builddir)/rockchip/libdrm_rockchip.la
++
++rockchip_rga_test_SOURCES = \
++	rockchip_rga_test.c
++
+--- /dev/null
++++ b/tests/rockchip/rockchip_rga_test.c
+@@ -0,0 +1,719 @@
++/*
++ * Copyright (C) 2013 Samsung Electronics Co.Ltd
++ * Authors:
++ *	Yakir Yang <ykk@rock-chips.com>
++ *
++ * This program is free software; you can redistribute  it and/or modify it
++ * under  the terms of  the GNU General  Public License as published by the
++ * Free Software Foundation;  either version 2 of the  License, or (at your
++ * option) any later version.
++ *
++ */
++
++//#define DEST_RGB_DISP		1
++
++#ifdef HAVE_CONFIG_H
++#include "config.h"
++#endif
++
++#include <stdlib.h>
++#include <stdio.h>
++#include <string.h>
++#include <errno.h>
++#include <time.h>
++#include <unistd.h>
++
++#include <sys/mman.h>
++#include <linux/stddef.h>
++
++#include <xf86drm.h>
++#include <xf86drmMode.h>
++#include <libkms.h>
++#include <drm_fourcc.h>
++
++#include "rockchip_drm.h"
++#include "rockchip_drmif.h"
++#include "rockchip_rga.h"
++
++#define DRM_MODULE_NAME		"rockchip"
++#define MAX_TEST_CASE		1
++
++struct rga_context *ctx;
++
++struct connector {
++	uint32_t id;
++	char mode_str[64];
++	char format_str[5];
++	unsigned int fourcc;
++	drmModeModeInfo *mode;
++	drmModeEncoder *encoder;
++	int crtc;
++	int pipe;
++	int plane_zpos;
++	unsigned int fb_id[2], current_fb_id;
++	struct timeval start;
++
++	int swap_count;
++};
++
++struct rga_test {
++	struct rockchip_device *dev;
++	struct rockchip_bo *dst_bo;
++	struct rockchip_bo *src_bo;
++	struct connector src_con;
++	struct connector dst_con;
++
++	struct rga_image src_img;
++	struct rga_image dst_img;
++};
++
++static void connector_find_mode(int fd, struct connector *c, drmModeRes *resources)
++{
++	drmModeConnector *connector;
++	int i, j;
++
++	/* First, find the connector & mode */
++	c->mode = NULL;
++
++	for (i = 0; i < resources->count_connectors; i++) {
++		connector = drmModeGetConnector(fd, resources->connectors[i]);
++
++		if (!connector) {
++			fprintf(stderr, "could not get connector %i: %s\n",
++				resources->connectors[i], strerror(errno));
++			drmModeFreeConnector(connector);
++			continue;
++		}
++
++		if (!connector->count_modes) {
++			drmModeFreeConnector(connector);
++			continue;
++		}
++
++		if (connector->connector_id != c->id) {
++			drmModeFreeConnector(connector);
++			continue;
++		}
++
++		for (j = 0; j < connector->count_modes; j++) {
++			c->mode = &connector->modes[j];
++			if (!strcmp(c->mode->name, c->mode_str))
++				break;
++		}
++
++		/* Found it, break out */
++		if (c->mode)
++			break;
++
++		drmModeFreeConnector(connector);
++	}
++
++	if (!c->mode) {
++		fprintf(stderr, "failed to find mode \"%s\"\n", c->mode_str);
++		return;
++	}
++
++	/* Now get the encoder */
++	for (i = 0; i < resources->count_encoders; i++) {
++		c->encoder = drmModeGetEncoder(fd, resources->encoders[i]);
++
++		if (!c->encoder) {
++			fprintf(stderr, "could not get encoder %i: %s\n",
++				resources->encoders[i], strerror(errno));
++			drmModeFreeEncoder(c->encoder);
++			continue;
++		}
++
++		if (c->encoder->encoder_id  == connector->encoder_id)
++			break;
++
++		drmModeFreeEncoder(c->encoder);
++	}
++
++	if (c->crtc == -1)
++		c->crtc = c->encoder->crtc_id;
++}
++
++static int drm_set_crtc(struct rockchip_device *dev, struct connector *c,
++			unsigned int fb_id)
++{
++	int ret;
++
++	ret = drmModeSetCrtc(dev->fd, c->crtc, fb_id, 0, 0, &c->id, 1, c->mode);
++	if (ret) {
++		printf("failed to set mode: %s\n", strerror(errno));
++		goto err;
++	}
++
++	return 0;
++
++err:
++	return ret;
++}
++
++static struct rockchip_bo *rockchip_create_buffer(struct rockchip_device *dev,
++						  unsigned long size,
++						  unsigned int flags)
++{
++	struct rockchip_bo *bo;
++
++	bo = rockchip_bo_create(dev, size, flags);
++	if (!bo)
++		return bo;
++
++	if (!rockchip_bo_map(bo)) {
++		rockchip_bo_destroy(bo);
++		return NULL;
++	}
++
++	return bo;
++}
++
++static void rockchip_destroy_buffer(struct rockchip_bo *bo)
++{
++	rockchip_bo_destroy(bo);
++}
++
++
++static int rga_context_test(struct rga_test *test)
++{
++	struct rockchip_device *dev = test->dev;
++	struct rga_image test1 = test->src_img;
++	struct rga_image test2 = test->dst_img;
++	uint8_t * _src = test->src_bo->vaddr;
++	uint8_t * _dst = test->dst_bo->vaddr;
++	unsigned int img_w, img_h;
++	unsigned int i, j;
++	int ret;
++
++	img_w = 720;
++	img_h = 306;
++
++	test1.width = img_w;
++	test1.height = img_h;
++	test1.stride = test1.width;
++	test1.color_mode = DRM_FORMAT_NV12;
++
++	test2.width = img_h;
++	test2.height = img_w;
++	test2.stride = test2.width;
++	test2.color_mode = DRM_FORMAT_NV12;
++
++	test1.fill_color = 0xAA;
++	ret = rga_solid_fill(ctx, &test1, 0, 0, test1.width, test1.height);
++	ret = rga_exec(ctx);
++	if (ret)
++		return ret;
++
++	test2.fill_color = 0x00;
++	ret = rga_solid_fill(ctx, &test2, 0, 0, test2.width, test2.height);
++	ret = rga_exec(ctx);
++	if (ret)
++		return ret;
++
++	rga_multiple_transform(ctx, &test1, &test2, 0, 0, test1.width, test1.height,
++			       0, 0, test2.width, test2.height, 90, 0, 0);
++	ret = rga_exec(ctx);
++	if (ret < 0)
++		return ret;
++
++	for (i = 0; i < img_w; i++) {
++		for (j = 0; j < img_h; j++) {
++			if (_src[j * img_w + i] != _dst[j * img_w + i]) {
++				printf("*[RGA ERROR]* : src (%d, %d) [%x]  !=  "
++				       "dst (%d, %d) [%x]\n", i, j, _src[j * img_w + i],
++				       j, i, _dst[j* img_w + i]);
++				return -1;
++			}
++		}
++	}
++	
++	return 0;
++}
++
++static int rga_rot_scale_test(struct rga_test *test)
++{
++	struct rga_image *src = &test->src_img;
++	struct rga_image *dst = &test->dst_img;
++	struct rga_image test_img = *src;
++	unsigned int i, j;
++	int ret;
++
++	printf("-------- Fill source buffer pattern\n");
++	src->fill_color = 0x0;
++	ret = rga_solid_fill(ctx, src, 0, 0, src->width, src->height);
++	ret = rga_exec(ctx);
++	if (ret)
++		return ret;
++
++	src->fill_color = 0xff00;
++	rga_solid_fill(ctx, src, 5, 5, 500, 100);
++	src->fill_color = 0xff;
++	rga_solid_fill(ctx, src, 5, 105, 500, 100);
++	src->fill_color = 0xff0000;
++	rga_solid_fill(ctx, src, 5, 205, 500, 100);
++	src->fill_color = 0xffffffff;
++	rga_solid_fill(ctx, src, 50, 5, 50, 400);
++	ret = rga_exec(ctx);
++	if (ret)
++		return ret;
++
++	dst->fill_color = 0x0;
++	ret = rga_solid_fill(ctx, dst, 0, 0, dst->width, dst->height);
++	ret = rga_exec(ctx);
++	if (ret)
++		return ret;
++
++	for (i = 100; i < dst->width; i++) {
++		for (j = 100; j < dst->height; j+=1) {
++			printf("------- 0 degree (500, 400) --> (%d, %d)\n", i, j);
++			rga_multiple_transform(ctx, src, dst, 0, 0, 500, 400,
++					0, 0, i, j, 0, 0, 0);
++			ret = rga_exec(ctx);
++			if (ret < 0)
++				return ret;
++
++#if 0
++			/*
++			 * RGA API Related:
++			 *
++			 * This code would SCALING and RORATE 90 Degree the source
++			 * framebuffer, and place the output to dest framebuffer,
++			 * and the window size is:
++			 */
++			printf("------- 90 degree (500, 400) --> (%d, %d)\n", i, j);
++			rga_multiple_transform(ctx, src, dst, 0, 0, 500, 400,
++					0, 0, i, j, 90, 0, 0);
++			ret = rga_exec(ctx);
++			if (ret < 0)
++				return ret;
++
++			printf("------- 180 degree (500, 400) --> (%d, %d)\n", i, j);
++			rga_multiple_transform(ctx, src, dst, 0, 0, 500, 400,
++					0, 0, i, j, 180, 0, 0);
++			ret = rga_exec(ctx);
++			if (ret < 0)
++				return ret;
++
++			printf("------- 270 degree (500, 400) --> (%d, %d)\n", i, j);
++			rga_multiple_transform(ctx, src, dst, 0, 0, 500, 400,
++					0, 0, i, j, 270, 0, 0);
++			ret = rga_exec(ctx);
++			if (ret < 0)
++				return ret;
++#endif
++		}
++	}
++
++	return 0;
++}
++
++static int rga_cmdlist_test(struct rga_test *test)
++{
++	struct rga_image *dst = &test->dst_img;
++	int ret;
++
++	while (1) {
++		dst->fill_color = 0x0;
++		rga_solid_fill(ctx, dst, 0, 0, dst->width, dst->height);
++		ret = rga_exec(ctx);
++		if (ret)
++			return ret;
++
++		dst->fill_color = 0xff00;
++		rga_solid_fill(ctx, dst, 5, 5, 500, 100);
++		dst->fill_color = 0xff;
++		rga_solid_fill(ctx, dst, 5, 105, 500, 100);
++		dst->fill_color = 0xff0000;
++		rga_solid_fill(ctx, dst, 5, 205, 500, 100);
++		dst->fill_color = 0xffffffff;
++		rga_solid_fill(ctx, dst, 50, 5, 50, 400);
++		ret = rga_exec(ctx);
++		if (ret)
++			return ret;
++
++		getchar();
++	}
++
++	return 0;
++}
++
++static int rga_color_fill_test(struct rga_test *test)
++{
++	int ret;
++	struct rga_image *dst = &test->dst_img;
++
++	/*
++	 * RGA API Related:
++	 *
++	 * Initialize the source framebuffer and dest framebuffer with BLACK color.
++	 *
++	 * The "->fill_color" variable is corresponding to RGA target color, and it's
++	 * ARGB8888 format, like if you want the source framebuffer filled with
++	 * RED COLOR, then you should fill the "->fill_color" with 0x00ff0000.
++	 */
++	dst->fill_color = 0xff0000ff;
++	rga_solid_fill(ctx, dst, 0, 0, dst->width, dst->height);
++	ret = rga_exec(ctx);
++	if (ret)
++		return ret;
++	sleep(3);
++
++	dst->fill_color = 0xff00ff00;
++	rga_solid_fill(ctx, dst, 0, 0, dst->width, dst->height);
++	ret = rga_exec(ctx);
++	if (ret)
++		return ret;
++	sleep(3);
++
++	dst->fill_color = 0xffff0000;
++	rga_solid_fill(ctx, dst, 0, 0, dst->width, dst->height);
++	ret = rga_exec(ctx);
++	if (ret)
++		return ret;
++	sleep(3);
++
++	return 0;
++}
++
++static int rga_csc_test(struct rockchip_device *dev, struct rga_image *src, struct rga_image *dst)
++{
++	struct rga_image test = *src;
++	int ret;
++
++	test.width = src->width;
++	test.height = src->height;
++	test.stride = test.width * 4;
++	test.color_mode = DRM_FORMAT_ARGB8888;
++
++	test.fill_color = 0xffffffff;
++	rga_solid_fill(ctx, &test, 0, 0, test.width, test.height);
++	ret = rga_exec(ctx);
++	if (ret)
++		return ret;
++	sleep(1);
++
++	ret = rga_multiple_transform(ctx, &test, dst, 0, 0, test.width, test.height,
++			0, 0, dst->width, dst->height, 0, 0, 0);
++	ret = rga_exec(ctx);
++	if (ret)
++		return ret;
++
++	return 0;
++}
++
++static int rga_test(struct rga_test *test)
++{
++	int ret;
++
++	ret = rga_cmdlist_test(test);
++	if (ret) {
++		printf("*[RGA ERROR]*: Failed at cmdlist test\n");
++		return ret;
++	}
++
++	ret = rga_color_fill_test(test);
++	if (ret) {
++		printf("*[RGA ERROR]*: Failed at color fill test\n");
++		return ret;
++	}
++
++	/*
++	ret = rga_context_test(test);
++	if (ret) {
++		printf("*[RGA ERROR]*: Failed at context test\n");
++		return ret;
++	}
++	*/
++
++	ret = rga_rot_scale_test(test);
++	if (ret) {
++		printf("*[RGA ERROR]*: Failed at rotate / scale test\n");
++		return ret;
++	}
++
++	return 0;
++}
++
++static int rga_copy_nv12_to_nv12_test(struct rga_test *test, enum e_rga_buf_type type)
++{
++	struct rockchip_device *dev = test->dev;
++	struct rockchip_bo *src = test->src_bo;
++	struct rockchip_bo *dst = test->dst_bo;
++	struct connector *src_con = &test->src_con;
++	struct connector *dst_con = &test->dst_con;
++	struct rga_image src_img = {0}, dst_img = {0};
++	unsigned int img_w, img_h;
++	int dst_fd, src_fd;
++
++	/*
++	 * RGA API Related:
++	 *
++	 * Due to RGA API only accept the fd of dma_buf, so we need
++	 * to conver the dma_buf Handle to dma_buf FD.
++	 *
++	 * And then just assigned the src/dst framebuffer FD to the
++	 * "struct rga_img".
++	 *
++	 * And for now, RGA driver only support GEM buffer type, so
++	 * we also need to assign the src/dst buffer type to RGA_IMGBUF_GEM.
++	 *
++	 * For futher, I would try to add user point support.
++	 */
++	drmPrimeHandleToFD(dev->fd, dst->handle, 0 , &dst_fd);
++	drmPrimeHandleToFD(dev->fd, src->handle, 0 , &src_fd);
++
++	dst_img.bo[0] = dst_fd;
++	src_img.bo[0] = src_fd;
++
++	/*
++	 * RGA API Related:
++	 *
++	 * Configure the source FB width / height / stride / color_mode.
++	 * 
++	 * The width / height is correspond to the framebuffer width /height
++	 *
++	 * The stride is equal to (width * pixel_width).
++	 *
++	 * The color_mode should configure to the standard DRM color format
++	 * which defined in "/user/include/drm/drm_fourcc.h"
++	 *
++	 */
++	img_w = src_con->mode->hdisplay;
++	img_h = src_con->mode->vdisplay;
++
++	src_img.width = img_w;
++	src_img.height = img_h;
++	src_img.stride = img_w * 4;
++	src_img.buf_type = type;
++	src_img.color_mode = DRM_FORMAT_ARGB8888;
++
++	img_w = dst_con->mode->hdisplay;
++	img_h = dst_con->mode->vdisplay;
++
++	dst_img.width = img_w;
++	dst_img.height = img_h;
++	dst_img.buf_type = type;
++#ifdef DEST_RGB_DISP
++	dst_img.stride = img_w * 4;
++	dst_img.color_mode = DRM_FORMAT_ARGB8888;
++#else
++	dst_img.stride = img_w;
++	dst_img.color_mode = DRM_FORMAT_NV21;
++#endif
++
++	/*
++	 * RGA Tested Related:
++	 *
++	 * Start to run test between source FB and dest FB
++	 */
++
++	test->dst_img = dst_img;
++	test->src_img = src_img;
++
++	rga_test(test);
++
++	close(src_fd);
++	close(dst_fd);
++
++	return 0;
++}
++
++static struct rockchip_bo *init_crtc(struct connector *con,
++				     struct rockchip_device *dev)
++{
++	struct rockchip_bo *bo;
++	unsigned int screen_width, screen_height;
++	drmModeRes *resources;
++
++	resources = drmModeGetResources(dev->fd);
++	if (!resources) {
++		fprintf(stderr, "drmModeGetResources failed: %s\n",
++				strerror(errno));
++		return NULL;
++	}
++
++	connector_find_mode(dev->fd, con, resources);
++	drmModeFreeResources(resources);
++	if (!con->mode) {
++		fprintf(stderr, "failed to find usable connector\n");
++		return NULL;
++	}
++
++	screen_width = con->mode->hdisplay;
++	screen_height = con->mode->vdisplay;
++
++	if (screen_width == 0 || screen_height == 0) {
++		fprintf(stderr, "failed to find sane resolution on connector\n");
++		return NULL;
++	}
++
++	printf("screen width = %d, screen height = %d\n", screen_width, screen_height);
++
++	bo = rockchip_create_buffer(dev, screen_width * screen_height * 4, 0);
++	if (!bo) {
++		return NULL;
++	}
++
++	con->plane_zpos = -1;
++
++	return bo;
++}
++
++static int rga_nv12_to_nv12_test(struct rga_test *test)
++{
++	struct rockchip_device *dev = test->dev;
++	struct rockchip_bo *dst_bo = test->dst_bo;
++	struct connector *dst_con = &test->dst_con;
++	uint32_t handles[4] = {0}, pitches[4] = {0}, offsets[4] = {0};
++	unsigned int dst_fb_id;
++	int ret, modes;
++
++	/*
++	 * Dest FB Displayed Related:
++	 *
++	 * Add the dest framebuffer to DRM connector, note that for NV12
++	 * display, the virtual stride is (width), that's why pitches[0]
++	 * is hdisplay.
++	 */
++#ifdef DEST_RGB_DISP
++	modes = DRM_FORMAT_XRGB8888;
++	pitches[0] = dst_con->mode->hdisplay * 4;
++#else
++	modes = DRM_FORMAT_NV12;
++	pitches[0] = dst_con->mode->hdisplay;
++        handles[1] = dst_bo->handle;
++        pitches[1] = dst_con->mode->hdisplay;
++        offsets[1] = dst_con->mode->hdisplay * dst_con->mode->vdisplay;
++#endif
++
++	handles[0] = dst_bo->handle;
++	offsets[0] = 0;
++	ret = drmModeAddFB2(dev->fd, dst_con->mode->hdisplay, dst_con->mode->vdisplay,
++			    modes, handles, pitches, offsets, &dst_fb_id, 0);
++	if (ret < 0)
++		return -EFAULT;
++
++	ret = drm_set_crtc(dev, dst_con, dst_fb_id);
++	if (ret < 0)
++		return -EFAULT;
++
++	/*
++	 * TEST RGA Related:
++	 *
++	 * Start to configure the RGA module and run test
++	 */
++	ret = rga_copy_nv12_to_nv12_test(test, RGA_IMGBUF_GEM);
++	if (ret < 0) {
++		fprintf(stderr, "failed to test copy operation.\n");
++		return -EFAULT;
++	}
++
++	/*
++	 * Display Related:
++	 *
++	 * Released the display framebufffer refer which hold
++	 * by DRM display framework
++	 */
++	drmModeRmFB(dev->fd, dst_fb_id);
++
++	return 0;
++}
++
++int main(int argc, char **argv)
++{
++	struct rockchip_device *dev;
++	struct connector src_con, dst_con;
++	struct rga_test test = {0};
++	int fd;
++
++	fd = drmOpen(DRM_MODULE_NAME, NULL);
++	if (fd < 0) {
++		fprintf(stderr, "failed to open.\n");
++		return fd;
++	}
++
++	dev = rockchip_device_create(fd);
++	if (!dev) {
++		drmClose(dev->fd);
++		return -EFAULT;
++	}
++
++	/*
++	 * RGA API Related:
++	 *
++	 * Open the RGA device
++	 */
++	ctx = rga_init(dev->fd);
++	if (!ctx)
++		return -EFAULT;
++
++
++	/*
++	 * Test Display Related:
++	 *
++	 * Source framebuffer display connector init. Just a
++	 * hack. Directly use the eDP monitor, and force to
++	 * use the 1920x1080 display mode.
++	 */
++	memset(&src_con, 0, sizeof(struct connector));
++	src_con.crtc = -1;
++	src_con.id = 33;
++	src_con.mode = alloca(sizeof(drmModeModeInfo));
++	src_con.mode->hdisplay = 720;
++	src_con.mode->vdisplay = 720;
++	src_con.plane_zpos = -1;
++
++	test.src_bo = rockchip_create_buffer(dev, src_con.mode->hdisplay * src_con.mode->vdisplay * 4, 0);
++	if (!test.src_bo) {
++		fprintf(stderr, "Failed to create source fb!\n");
++		return -EFAULT;
++	}
++
++
++	/*
++	 * Test Display Related:
++	 *
++	 * Dest framebuffer display connector init. Just a
++	 * hack. Directly use the eDP monitor, and force to
++	 * use the 1280x800 display mode.
++	 */
++	dst_con.crtc = -1;
++	dst_con.id = 29;
++	strcpy(dst_con.mode_str, "2560x1600");
++	strcpy(dst_con.mode_str, "2048x1536");
++
++	dst_con.id = 27;
++	strcpy(dst_con.mode_str, "1200x1920");
++
++	dst_con.id = 30;
++	strcpy(dst_con.mode_str, "1920x1080");
++
++	test.dst_bo = init_crtc(&dst_con, dev);
++	if (test.dst_bo == NULL) {
++		printf("init dst crtc failed \n");
++		return 0;
++	}
++
++	test.dst_con = dst_con;
++	test.src_con = src_con;
++	test.dev = dev;
++
++	printf("Satrting NV12 to NV12 RGA test, [Press Enter to continue]\n");
++	rga_nv12_to_nv12_test(&test);
++
++	/*
++	 * RGA API Related:
++	 *
++	 * Close the RGA device
++	 */
++	rga_fini(ctx);
++
++	rockchip_destroy_buffer(test.src_bo);
++	rockchip_destroy_buffer(test.dst_bo);
++
++	drmClose(dev->fd);
++	rockchip_device_destroy(dev);
++
++	return 0;
++}
